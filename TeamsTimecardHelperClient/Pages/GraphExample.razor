@@ -1,0 +1,22 @@
+﻿@page "/graph-example"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Graph
+@attribute [Authorize]
+@inject GraphServiceClient GraphClient
+
+<h3>Graph Client Example</h3>
+
+@if (user != null)
+{
+    <p>Hello @user.DisplayName</p>
+}
+
+@code {
+    private User? user;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var request = GraphClient.Me.Request();
+        user = await request.GetAsync();
+    }
+}
