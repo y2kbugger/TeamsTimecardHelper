@@ -23,6 +23,11 @@
     <p>teamId: @theteam.Id</p>
 }
 
+@if (total_hours != null && total_hours > new TimeSpan())
+{
+    <p>You have worked <span id="totalhours">@FormatDuration(total_hours)</span> in total.</p>
+}
+
 @if (timecards != null)
 {
     <h2>Timecards</h2>
@@ -40,17 +45,24 @@
                 <td>@timecard.Id</td>
                 <td>@timecard.ClockInEvent.DateTime</td>
                 <td>@timecard.ClockOutEvent.DateTime</td>
-                <td>@(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime)</td>
+                <td>@(FormatDuration(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime))</td>
             </tr>
         }
     </table>
 }
 
 @code {
+    private string FormatDuration(TimeSpan? ts){
+        if (ts == null)
+            return "??";
+        var tss = (TimeSpan)ts;
+        return String.Format("{0}:{1}", tss.Days * tss.Hours, tss.Minutes);
+    }
     int selected_team_index = 0 ;
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
+    private TimeSpan total_hours;
 
     protected override async Task OnInitializedAsync()
     {
@@ -70,5 +82,14 @@
         timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
             .Request()
             .GetAsync();
+
+        total_hours = new TimeSpan();
+        foreach (var tc in timecards)
+        {
+            var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
+                ?? (tc.ClockInEvent.DateTime - DateTime.Now)
+                ?? new TimeSpan();
+            total_hours += hours;
+        }
     }
 }
