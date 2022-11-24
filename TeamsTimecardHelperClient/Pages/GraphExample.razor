@@ -11,12 +11,58 @@
     <p>Hello @user.DisplayName</p>
 }
 
+@if (shits != null)
+{
+    <p>shifts: @shits.ToString()</p>
+    <p>shifts count: @shits.Count()</p>
+    <p>shifts startdatetime: @shits[0].SharedShift.StartDateTime</p>
+}
+
+@if (teams != null)
+{
+    <h2>All Teams</h2>
+    foreach (var team in teams)
+    {
+        <p>team: @team.DisplayName</p>
+    }
+}
+
+@if (theteam != null)
+{
+    <h2>Selected Team</h2>
+    <p>team: @theteam.DisplayName</p>
+    <p>teamId: @theteam.Id</p>
+    @* <h2>Teams Scheduled Shift</h2>
+    foreach (var shift in theteam.Schedule.Shifts)
+    {
+        <p>shift: @shift.Id, created datetime: @shift.CreatedDateTime</p>
+    } *@
+}
+
 @code {
     private User? user;
+    private IScheduleShiftsCollectionPage? shits;
+    private IUserJoinedTeamsCollectionPage? teams;
+    private Team? theteam;
 
     protected override async Task OnInitializedAsync()
     {
-        var request = GraphClient.Me.Request();
-        user = await request.GetAsync();
+        @* var request = GraphClient.Me.Request();
+        user = await request.GetAsync(); *@
+
+        @* var teamId = "TEAM_83d3bcb7-dea9-48da-a28c-d8f509264852"; *@
+        @* var teamId = "83d3bcb7-dea9-48da-a28c-d8f509264852"; *@
+
+
+        teams = await GraphClient.Me.JoinedTeams
+            .Request()
+            .GetAsync();
+
+        theteam = teams[0];
+
+        shits = await GraphClient.Teams[theteam.Id].Schedule.Shifts
+            .Request()
+            .GetAsync();
+
     }
 }

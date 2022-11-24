@@ -52,7 +52,7 @@ internal static class GraphClientExtensions
                 new AccessTokenRequestOptions()
                 {
                     Scopes = new[] {
-                        "https://graph.microsoft.com/User.Read",
+                        "https://graph.microsoft.com/User.Read.All",
                         "https://graph.microsoft.com/Schedule.ReadWrite.All",
                         }
                 });
