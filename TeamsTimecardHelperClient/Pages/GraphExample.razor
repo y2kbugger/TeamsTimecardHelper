@@ -39,11 +39,34 @@
     <p>teamId: @theteam.Id</p>
 }
 
+@if (timecards != null)
+{
+    <h2>Timecards</h2>
+    <table>
+        <tr>
+            <th>Id</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Duration</th>
+        </tr>
+        @foreach (var timecard in timecards)
+        {
+            <tr>
+                <td>@timecard.Id</td>
+                <td>@timecard.ClockInEvent.DateTime</td>
+                <td>@timecard.ClockOutEvent.DateTime</td>
+                <td>@(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime)</td>
+            </tr>
+        }
+    </table>
+}
+
 @code {
     private User? user;
     private IScheduleShiftsCollectionPage? shits;
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
+    private IScheduleTimeCardsCollectionPage? timecards;
 
     protected override async Task OnInitializedAsync()
     {
@@ -64,6 +87,11 @@
             .Request()
             .GetAsync();
         StateHasChanged();
+
+        timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
+            .Request()
+            .GetAsync();
+
 
     }
 }
