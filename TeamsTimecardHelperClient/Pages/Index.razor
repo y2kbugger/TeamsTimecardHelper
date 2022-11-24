@@ -6,23 +6,6 @@
 
 <h3>Graph Client Example</h3>
 
-@if (user != null)
-{
-    <p>Hello @user.DisplayName</p>
-}
-
-@if (shits != null)
-{
-    <p>shifts: @shits.ToString()</p>
-    <p>shifts count: @shits.Count()</p>
-    <p>shifts startdatetime: @shits[0].SharedShift.StartDateTime</p>
-    <h2>Teams Scheduled Shift</h2>
-    foreach (var shift in shits)
-    {
-        <p>shift: @shift.Id, created datetime: @shift.CreatedDateTime</p>
-    }
-}
-
 @if (teams != null)
 {
     <h2>All Teams</h2>
@@ -35,6 +18,7 @@
 @if (theteam != null)
 {
     <h2>Selected Team</h2>
+    <p><span>Selected Team Id:&nbsp;</span><b>@selected_team_index</b></p>
     <p>team: @theteam.DisplayName</p>
     <p>teamId: @theteam.Id</p>
 }
@@ -49,6 +33,7 @@
             <th>End</th>
             <th>Duration</th>
         </tr>
+
         @foreach (var timecard in timecards)
         {
             <tr>
@@ -62,15 +47,14 @@
 }
 
 @code {
-    private User? user;
-    private IScheduleShiftsCollectionPage? shits;
+    int selected_team_index = 0 ;
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
 
     protected override async Task OnInitializedAsync()
     {
-        user = await GraphClient.Me
+        var user = await GraphClient.Me
             .Request()
             .GetAsync();
         StateHasChanged();
@@ -80,18 +64,11 @@
             .GetAsync();
         StateHasChanged();
 
-        theteam = teams[0];
-        StateHasChanged();
-
-        shits = await GraphClient.Teams[theteam.Id].Schedule.Shifts
-            .Request()
-            .GetAsync();
+        theteam = teams[selected_team_index];
         StateHasChanged();
 
         timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
             .Request()
             .GetAsync();
-
-
     }
 }
