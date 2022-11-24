@@ -16,6 +16,11 @@
     <p>shifts: @shits.ToString()</p>
     <p>shifts count: @shits.Count()</p>
     <p>shifts startdatetime: @shits[0].SharedShift.StartDateTime</p>
+    <h2>Teams Scheduled Shift</h2>
+    foreach (var shift in shits)
+    {
+        <p>shift: @shift.Id, created datetime: @shift.CreatedDateTime</p>
+    }
 }
 
 @if (teams != null)
@@ -32,11 +37,6 @@
     <h2>Selected Team</h2>
     <p>team: @theteam.DisplayName</p>
     <p>teamId: @theteam.Id</p>
-    @* <h2>Teams Scheduled Shift</h2>
-    foreach (var shift in theteam.Schedule.Shifts)
-    {
-        <p>shift: @shift.Id, created datetime: @shift.CreatedDateTime</p>
-    } *@
 }
 
 @code {
@@ -47,22 +47,23 @@
 
     protected override async Task OnInitializedAsync()
     {
-        @* var request = GraphClient.Me.Request();
-        user = await request.GetAsync(); *@
-
-        @* var teamId = "TEAM_83d3bcb7-dea9-48da-a28c-d8f509264852"; *@
-        @* var teamId = "83d3bcb7-dea9-48da-a28c-d8f509264852"; *@
-
+        user = await GraphClient.Me
+            .Request()
+            .GetAsync();
+        StateHasChanged();
 
         teams = await GraphClient.Me.JoinedTeams
             .Request()
             .GetAsync();
+        StateHasChanged();
 
         theteam = teams[0];
+        StateHasChanged();
 
         shits = await GraphClient.Teams[theteam.Id].Schedule.Shifts
             .Request()
             .GetAsync();
+        StateHasChanged();
 
     }
 }
