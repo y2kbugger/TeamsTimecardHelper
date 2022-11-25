@@ -4,92 +4,133 @@
 @attribute [Authorize]
 @inject GraphServiceClient GraphClient
 
-<h3>Graph Client Example</h3>
+    <h2 class="text-center">Timecard Total</h2>
+    <div class="d-flex justify-content-center">
+        <RadzenRadialGauge>
+            <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
+                <RadzenRadialGaugeScalePointer Value="@(total_timespan.TotalHours)">
+                    <Template Context="pointer">
+                        <div class="totalhours-container">
+                            <div class="totalhours-value">
+                                @if (total_timespan != null && total_timespan > new TimeSpan())
+                                {
+                                    <span>@FormatDuration(TimeSpan.FromHours(pointer.Value))</span>
+                                }
+                                else
+                                {
+                                    <span>--:--</span>
+                                }
+                            </div>
+                            <div class="totalhours-units">
+                                HH:MM
+                            </div>
+                        </div>
+                    </Template>
+                </RadzenRadialGaugeScalePointer>
+                <RadzenRadialGaugeScaleRange From="0" To="20" Fill="green" />
+                <RadzenRadialGaugeScaleRange From="20" To="25" Fill="orange" />
+                <RadzenRadialGaugeScaleRange From="25" To="30" Fill="red" />
+            </RadzenRadialGaugeScale>
+        </RadzenRadialGauge>
+    </div>
 
-@if (teams != null)
-{
-    <h2>All Teams</h2>
-    foreach (var team in teams)
-    {
-        <p>team: @team.DisplayName</p>
-    }
-}
+<RadzenCard class="w-100 mt-3 p-3">
+    <RadzenPanel Collapsed="true" AllowCollapse="true">
+        <HeaderTemplate>
+            <h2>Technical Details</h2>
+        </HeaderTemplate>
+        <ChildContent>
+            @if (teams != null)
+            {
+                <h2>All Teams</h2>
+                foreach (var team in teams)
+                {
+                    <p>team: @team.DisplayName</p>
+                }
+            }
 
-@if (theteam != null)
-{
-    <h2>Selected Team</h2>
-    <p><span>Selected Team Id:&nbsp;</span><b>@selected_team_index</b></p>
-    <p>team: @theteam.DisplayName</p>
-    <p>teamId: @theteam.Id</p>
-}
+            @if (theteam != null)
+            {
+                <h2>Selected Team</h2>
+                <p><span>Selected Team Id:&nbsp;</span><b>@selected_team_index</b></p>
+                <p>team: @theteam.DisplayName</p>
+                <p>teamId: @theteam.Id</p>
+            }
 
-@if (total_hours != null && total_hours > new TimeSpan())
-{
-    <p>You have worked <span id="totalhours">@FormatDuration(total_hours)</span> in total.</p>
-}
+            @if (timecards != null)
+            {
+                <h2>Timecards</h2>
+                <table>
+                    <tr>
+                        <th>Id</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Duration</th>
+                    </tr>
 
-@if (timecards != null)
-{
-    <h2>Timecards</h2>
-    <table>
-        <tr>
-            <th>Id</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Duration</th>
-        </tr>
-
-        @foreach (var timecard in timecards)
-        {
-            <tr>
-                <td>@timecard.Id</td>
-                <td>@timecard.ClockInEvent.DateTime</td>
-                <td>@timecard.ClockOutEvent.DateTime</td>
-                <td>@(FormatDuration(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime))</td>
-            </tr>
-        }
-    </table>
-}
+                    @foreach (var timecard in timecards)
+                    {
+                        <tr>
+                            <td>@timecard.Id</td>
+                            <td>@timecard.ClockInEvent.DateTime</td>
+                            <td>@timecard.ClockOutEvent.DateTime</td>
+                            <td>@(FormatDuration(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime))</td>
+                        </tr>
+                    }
+                </table>
+            }
+        </ChildContent>
+        <SummaryTemplate>
+            @if (theteam != null)
+            {
+                <p> Selected Team: <b>@(theteam?.DisplayName ?? "~")</b></p>
+                <p> Timecards: <b>@(timecards?.Count ?? 0)</b></p>
+            }
+        </SummaryTemplate>
+    </RadzenPanel>
+</RadzenCard>
 
 @code {
-    private string FormatDuration(TimeSpan? ts){
-        if (ts == null)
-            return "??";
-        var tss = (TimeSpan)ts;
-        return String.Format("{0}:{1}", tss.Days * tss.Hours, tss.Minutes);
-    }
-    int selected_team_index = 0 ;
+    int selected_team_index = 0;
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
-    private TimeSpan total_hours;
+    private TimeSpan total_timespan;
+
+    private string FormatDuration(TimeSpan? ts)
+    {
+        if (ts == null)
+            return "??";
+        var tss = (TimeSpan)ts;
+        return String.Format("{0:00}:{1:00}", tss.Days * tss.Hours, tss.Minutes);
+    }
 
     protected override async Task OnInitializedAsync()
     {
         var user = await GraphClient.Me
-            .Request()
-            .GetAsync();
+        .Request()
+        .GetAsync();
         StateHasChanged();
 
         teams = await GraphClient.Me.JoinedTeams
-            .Request()
-            .GetAsync();
+        .Request()
+        .GetAsync();
         StateHasChanged();
 
         theteam = teams[selected_team_index];
         StateHasChanged();
 
         timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
-            .Request()
-            .GetAsync();
+        .Request()
+        .GetAsync();
 
-        total_hours = new TimeSpan();
+        total_timespan = new TimeSpan();
         foreach (var tc in timecards)
         {
             var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
-                ?? (tc.ClockInEvent.DateTime - DateTime.Now)
-                ?? new TimeSpan();
-            total_hours += hours;
+            ?? (tc.ClockInEvent.DateTime - DateTime.Now)
+            ?? new TimeSpan();
+            total_timespan += hours;
         }
     }
 }

@@ -1,3 +1,16 @@
-#totalhours {
+.totalhours-container
+{
+    margin: 1em;
+    text-align: center;
+    line-height: 1;
+}
+.totalhours-value {
+    font-size: 3em;
+    font-weight: bolder;
+    color: #374f5a;
+}
+.totalhours-units {
     font-size: 2em;
+    text-align: center;
+    color: gainsboro;
 }
