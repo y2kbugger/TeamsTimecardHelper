@@ -14,4 +14,9 @@
     <PackageReference Include="Microsoft.Graph.Beta" Version="4.66.0-preview" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- https://github.com/dotnet/aspnetcore/issues/44981 -->
+    <TrimmerRootAssembly Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" />
+  </ItemGroup>
+
 </Project>
