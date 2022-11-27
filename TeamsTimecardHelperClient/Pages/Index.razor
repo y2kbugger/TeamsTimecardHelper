@@ -4,35 +4,28 @@
 @attribute [Authorize]
 @inject GraphServiceClient GraphClient
 
-    <h2 class="text-center">Timecard Total</h2>
-    <div class="d-flex justify-content-center">
-        <RadzenRadialGauge>
-            <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
-                <RadzenRadialGaugeScalePointer Value="@(total_timespan.TotalHours)">
-                    <Template Context="pointer">
-                        <div class="totalhours-container">
-                            <div class="totalhours-value">
-                                @if (total_timespan > new TimeSpan())
-                                {
-                                    <span>@FormatDuration(TimeSpan.FromHours(pointer.Value))</span>
-                                }
-                                else
-                                {
-                                    <span>--:--</span>
-                                }
-                            </div>
-                            <div class="totalhours-units">
-                                HH:MM
-                            </div>
+<h2 class="text-center">Timecard Total</h2>
+<div class="d-flex justify-content-center">
+    <RadzenRadialGauge>
+        <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
+            <RadzenRadialGaugeScalePointer Value="@(total_timespan?.TotalHours ?? 0)">
+                <Template Context="pointer">
+                    <div class="totalhours-container">
+                        <div class="totalhours-value">
+                            <span>@FormatDuration(total_timespan)</span>
                         </div>
-                    </Template>
-                </RadzenRadialGaugeScalePointer>
-                <RadzenRadialGaugeScaleRange From="0" To="20" Fill="green" />
-                <RadzenRadialGaugeScaleRange From="20" To="25" Fill="orange" />
-                <RadzenRadialGaugeScaleRange From="25" To="30" Fill="red" />
-            </RadzenRadialGaugeScale>
-        </RadzenRadialGauge>
-    </div>
+                        <div class="totalhours-units">
+                            HH:MM
+                        </div>
+                    </div>
+                </Template>
+            </RadzenRadialGaugeScalePointer>
+            <RadzenRadialGaugeScaleRange From="0" To="20" Fill="green" />
+            <RadzenRadialGaugeScaleRange From="20" To="25" Fill="orange" />
+            <RadzenRadialGaugeScaleRange From="25" To="30" Fill="red" />
+        </RadzenRadialGaugeScale>
+    </RadzenRadialGauge>
+</div>
 
 <RadzenCard class="w-100 mt-3 p-3">
     <RadzenPanel Collapsed="true" AllowCollapse="true">
@@ -95,34 +88,36 @@
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
-    private readonly List<TimeCard> all_timecards = new();
 
-    public DateTime StartOfWeek { get {
-        var dt = DateTime.Today;
-        int diff = (7 + (dt.DayOfWeek - System.DayOfWeek.Sunday)) % 7;
-        return dt.AddDays(-1 * diff).Date;
-        }}
+    public DateTime StartOfWeek =>
+        DateTime.Today.AddDays(-1 * (7 + (DateTime.Today.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
 
-    private List<TimeCard> current_timecards { get {
-        return all_timecards.Where(x => x.ClockInEvent.DateTime >= StartOfWeek).ToList();
-        }}
+    private List<TimeCard>? all_timecards = null;
+    private List<TimeCard>? current_timecards =>
+        all_timecards?.Where(x => x.ClockInEvent.DateTime >= StartOfWeek).ToList();
 
-    private TimeSpan total_timespan { get {
-        var total = new TimeSpan();
-        foreach (var tc in current_timecards)
-        {
-            var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
-            ?? (tc.ClockInEvent.DateTime - DateTime.Now)
-            ?? new TimeSpan();
-            total += hours;
+    private TimeSpan? total_timespan
+    {
+        get {
+            if (current_timecards == null)
+                return null;
+
+            var total = new TimeSpan();
+            foreach (var tc in current_timecards)
+            {
+                var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
+                ?? (tc.ClockInEvent.DateTime - DateTime.Now)
+                ?? new TimeSpan();
+                total += hours;
+            }
+            return total;
         }
-        return total;
-        }}
+    }
 
     private string FormatDuration(TimeSpan? ts)
     {
         if (ts == null)
-            return "??";
+            return "--:--";
         var tss = (TimeSpan)ts;
         return String.Format("{0:00}:{1:00}", (tss.Days * 60) + tss.Hours, tss.Minutes);
     }
@@ -142,23 +137,29 @@
         theteam = teams[selected_team_index];
         StateHasChanged();
 
-        timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
-        .Request()
-        @* .Filter(@"Id eq 'TCK_6eb2aa90-afa9-4c5c-897d-5c23fe1fa63b'") *@
-        @* .Filter("confirmedBy eq 'none'") *@
-        @* .OrderBy("clockInEvent/dateTime") *@
-        .Top(1)
-        .GetAsync();
 
-        // get all timecards
+        await FetchAllTimecards();
+
+    }
+
+    private async Task FetchAllTimecards()
+    {
+        timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
+            .Request()
+            @* None of these query options currently work in the beta API *@
+            @* .Filter(@"clockinEvent/dateTime ge '2022-11-22'") *@
+            @* .OrderBy("clockInEvent/dateTime") *@
+            .Top(900)
+            .GetAsync();
+        var my_timecards = new List<TimeCard>();
         while (timecards != null)
         {
-            all_timecards.AddRange(timecards);
+            my_timecards.AddRange(timecards);
             if (timecards.NextPageRequest != null)
                 timecards = await timecards.NextPageRequest.GetAsync();
             else
                 timecards = null;
         }
-
+        all_timecards = my_timecards;
     }
 }
