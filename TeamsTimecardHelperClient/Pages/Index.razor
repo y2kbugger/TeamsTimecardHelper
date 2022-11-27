@@ -102,7 +102,7 @@
         if (ts == null)
             return "??";
         var tss = (TimeSpan)ts;
-        return String.Format("{0:00}:{1:00}", tss.Days * tss.Hours, tss.Minutes);
+        return String.Format("{0:00}:{1:00}", (tss.Days * 60) + tss.Hours, tss.Minutes);
     }
 
     protected override async Task OnInitializedAsync()
