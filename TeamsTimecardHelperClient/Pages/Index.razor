@@ -12,7 +12,7 @@
                     <Template Context="pointer">
                         <div class="totalhours-container">
                             <div class="totalhours-value">
-                                @if (total_timespan != null && total_timespan > new TimeSpan())
+                                @if (total_timespan > new TimeSpan())
                                 {
                                     <span>@FormatDuration(TimeSpan.FromHours(pointer.Value))</span>
                                 }
@@ -96,7 +96,28 @@
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
     private readonly List<TimeCard> all_timecards = new();
-    private TimeSpan total_timespan;
+
+    public DateTime StartOfWeek { get {
+        var dt = DateTime.Today;
+        int diff = (7 + (dt.DayOfWeek - System.DayOfWeek.Sunday)) % 7;
+        return dt.AddDays(-1 * diff).Date;
+        }}
+
+    private List<TimeCard> current_timecards { get {
+        return all_timecards.Where(x => x.ClockInEvent.DateTime >= StartOfWeek).ToList();
+        }}
+
+    private TimeSpan total_timespan { get {
+        var total = new TimeSpan();
+        foreach (var tc in current_timecards)
+        {
+            var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
+            ?? (tc.ClockInEvent.DateTime - DateTime.Now)
+            ?? new TimeSpan();
+            total += hours;
+        }
+        return total;
+        }}
 
     private string FormatDuration(TimeSpan? ts)
     {
@@ -129,28 +150,15 @@
         .Top(1)
         .GetAsync();
 
-        total_timespan = new TimeSpan();
-
         // get all timecards
         while (timecards != null)
         {
             all_timecards.AddRange(timecards);
             if (timecards.NextPageRequest != null)
-            {
                 timecards = await timecards.NextPageRequest.GetAsync();
-            }
             else
-            {
                 timecards = null;
-            }
         }
 
-        foreach (var tc in all_timecards)
-        {
-            var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
-            ?? (tc.ClockInEvent.DateTime - DateTime.Now)
-            ?? new TimeSpan();
-            total_timespan += hours;
-        }
     }
 }
