@@ -95,6 +95,7 @@
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
+    private readonly List<TimeCard> all_timecards = new();
     private TimeSpan total_timespan;
 
     private string FormatDuration(TimeSpan? ts)
@@ -122,10 +123,29 @@
 
         timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
         .Request()
+        @* .Filter(@"Id eq 'TCK_6eb2aa90-afa9-4c5c-897d-5c23fe1fa63b'") *@
+        @* .Filter("confirmedBy eq 'none'") *@
+        @* .OrderBy("clockInEvent/dateTime") *@
+        .Top(1)
         .GetAsync();
 
         total_timespan = new TimeSpan();
-        foreach (var tc in timecards)
+
+        // get all timecards
+        while (timecards != null)
+        {
+            all_timecards.AddRange(timecards);
+            if (timecards.NextPageRequest != null)
+            {
+                timecards = await timecards.NextPageRequest.GetAsync();
+            }
+            else
+            {
+                timecards = null;
+            }
+        }
+
+        foreach (var tc in all_timecards)
         {
             var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
             ?? (tc.ClockInEvent.DateTime - DateTime.Now)
