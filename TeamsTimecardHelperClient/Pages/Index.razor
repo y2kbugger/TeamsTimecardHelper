@@ -103,14 +103,19 @@
         var total = new TimeSpan();
         foreach (var tc in current_timecards)
         {
-            DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("ClockInEvent.DateTime should never not be null");
-            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow;
-            var hours = (dt_out - dt_in);
-            total = total + hours;
+            total = total + HoursFromTimeCard(tc);
         }
 
         // This is required to stop blazor from infinitely re-rendering the page
         return new TimeSpan(total.Days, total.Hours, total.Minutes, total.Seconds);
+    }
+    private TimeSpan HoursFromTimeCard(TimeCard tc)
+    {
+            DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("ClockInEvent.DateTime should never not be null");
+            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow;
+            var hours = (dt_out - dt_in);
+            // todo handle breaks
+            return hours;
     }
 
     private string FormatDuration(TimeSpan? ts)
