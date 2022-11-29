@@ -58,6 +58,7 @@
                         <th>Id</th>
                         <th>Start</th>
                         <th>End</th>
+                        <th>Hours</th>
                     </tr>
 
                     @foreach (var timecard in current_timecards)
@@ -66,6 +67,7 @@
                             <td>@timecard.Id</td>
                             <td>@timecard.ClockInEvent.DateTime</td>
                             <td>@(timecard.ClockOutEvent != null ? timecard.ClockOutEvent.DateTime : "~")</td>
+                            <td>@(FormatDuration(HoursFromTimeCard(timecard)))</td>
                         </tr>
                     }
                 </table>
