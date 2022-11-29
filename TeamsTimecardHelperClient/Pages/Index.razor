@@ -1,9 +1,16 @@
-@page "/"
+﻿@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
 @inject GraphServiceClient GraphClient
 
+<div class="container">
+    <div class="row justify-content-end">
+        <RadzenDropDown Data=@teams @bind-Value=@theteamid
+            Change="FetchAllTimecards" TextProperty="DisplayName" ValueProperty="Id"
+            Class="col-md-2 m-1" />
+    </div>
+</div>
 <h2 class="text-center">Timecard Total</h2>
 <div class="d-flex justify-content-center">
     <RadzenRadialGauge>
