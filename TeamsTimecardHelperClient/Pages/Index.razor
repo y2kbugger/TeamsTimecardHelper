@@ -41,13 +41,10 @@
                     <p>team: @team.DisplayName</p>
                 }
             }
-
-            @if (theteam != null)
+            @if (theteamid != null)
             {
                 <h2>Selected Team</h2>
-                <p><span>Selected Team Id:&nbsp;</span><b>@selected_team_index</b></p>
-                <p>team: @theteam.DisplayName</p>
-                <p>teamId: @theteam.Id</p>
+                <p>teamId: @theteamid</p>
             }
 
             @if (current_timecards != null)
@@ -74,9 +71,9 @@
             }
         </ChildContent>
         <SummaryTemplate>
-            @if (theteam != null)
+            @if (theteamid != null)
             {
-                <p> Selected Team: <b>@(theteam?.DisplayName ?? "~")</b></p>
+                <p> Selected Team: <b>@(teams?.First(t=>t.Id==theteamid)?.DisplayName ?? "~")</b></p>
                 <p> All Timecards: <b>@(all_timecards?.Count ?? 0)</b></p>
                 <p> Current Timecards: <b>@(current_timecards?.Count ?? 0)</b></p>
             }
@@ -85,9 +82,8 @@
 </RadzenCard>
 
 @code {
-    int selected_team_index = 0;
+    string? theteamid;
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
-    private Team? theteam;
     private IScheduleTimeCardsCollectionPage? timecards;
 
     public DateTime StartOfWeek =>
@@ -138,11 +134,8 @@
         teams = await GraphClient.Me.JoinedTeams
         .Request()
         .GetAsync();
+        theteamid =  teams[1].Id;
         StateHasChanged();
-
-        theteam = teams[selected_team_index];
-        StateHasChanged();
-
 
         await FetchAllTimecards();
         StateHasChanged();
@@ -157,7 +150,7 @@
 
     private async Task FetchAllTimecards()
     {
-        timecards = await GraphClient.Teams[theteam.Id].Schedule.TimeCards
+        timecards = await GraphClient.Teams[theteamid].Schedule.TimeCards
             .Request()
             @* None of these query options currently work in the beta API *@
             @* .Filter(@"clockinEvent/dateTime ge '2022-11-22'") *@
