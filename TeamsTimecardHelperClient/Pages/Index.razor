@@ -6,6 +6,11 @@
 
 <div class="container">
     <div class="row justify-content-end">
+        <RadzenDatePicker DateRender=@DateRenderSundays
+            TValue="DateTime" @bind-Value=@StartOfWeek
+            DateFormat="yyyy-MM-dd"
+            Class="col-md-2 m-1" />
+
         <RadzenDropDown Data=@teams @bind-Value=@theteamid
             Change="FetchAllTimecards" TextProperty="DisplayName" ValueProperty="Id"
             Class="col-md-2 m-1" />
@@ -93,12 +98,14 @@
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private IScheduleTimeCardsCollectionPage? timecards;
 
-    public DateTime StartOfWeek =>
-        DateTime.Today.AddDays(-1 * (7 + (DateTime.Today.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
+    public DateTime StartOfWeek = DateTime.Today.AddDays(-1 * (7 + (DateTime.Today.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
 
     private List<TimeCard>? all_timecards = null;
     private List<TimeCard>? current_timecards =>
-        all_timecards?.Where(x => x.ClockInEvent.DateTime >= StartOfWeek).ToList();
+        all_timecards?.Where(
+            x => (x.ClockInEvent.DateTime >= StartOfWeek)
+            && (x.ClockInEvent.DateTime <= StartOfWeek.AddDays(7))
+            ).ToList(); // todo: handle case where timecard spans midnight at end of week
 
     private TimeSpan? total_timespan()
     {
@@ -129,6 +136,11 @@
             return "--:--";
         var tss = (TimeSpan)ts;
         return String.Format("{0:00}:{1:00}", (tss.Days * 24) + tss.Hours, tss.Minutes);
+    }
+
+    void DateRenderSundays(DateRenderEventArgs args)
+    {
+        args.Disabled = args.Date.DayOfWeek != System.DayOfWeek.Sunday;
     }
 
     protected override async Task OnInitializedAsync()
