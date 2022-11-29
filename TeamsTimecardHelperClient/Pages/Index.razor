@@ -1,4 +1,4 @@
-@page "/"
+﻿@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
@@ -138,7 +138,14 @@
 
 
         await FetchAllTimecards();
+        StateHasChanged();
 
+        var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+
+        while (await timer.WaitForNextTickAsync())
+        {
+            StateHasChanged();
+        }
     }
 
     private async Task FetchAllTimecards()
