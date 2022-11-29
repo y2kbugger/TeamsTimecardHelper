@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
@@ -8,11 +8,11 @@
 <div class="d-flex justify-content-center">
     <RadzenRadialGauge>
         <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
-            <RadzenRadialGaugeScalePointer Value="@(total_timespan?.TotalHours ?? 0)">
+            <RadzenRadialGaugeScalePointer Value="@(total_timespan()?.TotalHours ?? 0)">
                 <Template Context="pointer">
                     <div class="totalhours-container">
                         <div class="totalhours-value">
-                            <span>@FormatDuration(total_timespan)</span>
+                            <span>@FormatDuration(total_timespan())</span>
                         </div>
                         <div class="totalhours-units">
                             HH:MM
@@ -50,7 +50,7 @@
                 <p>teamId: @theteam.Id</p>
             }
 
-            @if (timecards != null)
+            @if (current_timecards != null)
             {
                 <h2>Timecards</h2>
                 <table>
@@ -58,16 +58,14 @@
                         <th>Id</th>
                         <th>Start</th>
                         <th>End</th>
-                        <th>Duration</th>
                     </tr>
 
-                    @foreach (var timecard in timecards)
+                    @foreach (var timecard in current_timecards)
                     {
                         <tr>
                             <td>@timecard.Id</td>
                             <td>@timecard.ClockInEvent.DateTime</td>
-                            <td>@timecard.ClockOutEvent.DateTime</td>
-                            <td>@(FormatDuration(timecard.ClockOutEvent.DateTime-timecard.ClockInEvent.DateTime))</td>
+                            <td>@(timecard.ClockOutEvent != null ? timecard.ClockOutEvent.DateTime : "~")</td>
                         </tr>
                     }
                 </table>
@@ -77,7 +75,8 @@
             @if (theteam != null)
             {
                 <p> Selected Team: <b>@(theteam?.DisplayName ?? "~")</b></p>
-                <p> Timecards: <b>@(timecards?.Count ?? 0)</b></p>
+                <p> All Timecards: <b>@(all_timecards?.Count ?? 0)</b></p>
+                <p> Current Timecards: <b>@(current_timecards?.Count ?? 0)</b></p>
             }
         </SummaryTemplate>
     </RadzenPanel>
@@ -96,22 +95,22 @@
     private List<TimeCard>? current_timecards =>
         all_timecards?.Where(x => x.ClockInEvent.DateTime >= StartOfWeek).ToList();
 
-    private TimeSpan? total_timespan
+    private TimeSpan? total_timespan()
     {
-        get {
-            if (current_timecards == null)
-                return null;
+        if (current_timecards == null)
+            return null;
 
-            var total = new TimeSpan();
-            foreach (var tc in current_timecards)
-            {
-                var hours = (tc.ClockOutEvent.DateTime - tc.ClockInEvent.DateTime)
-                ?? (tc.ClockInEvent.DateTime - DateTime.Now)
-                ?? new TimeSpan();
-                total += hours;
-            }
-            return total;
+        var total = new TimeSpan();
+        foreach (var tc in current_timecards)
+        {
+            DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("ClockInEvent.DateTime should never not be null");
+            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow;
+            var hours = (dt_out - dt_in);
+            total = total + hours;
         }
+
+        // This is required to stop blazor from infinitely re-rendering the page
+        return new TimeSpan(total.Days, total.Hours, total.Minutes, total.Seconds);
     }
 
     private string FormatDuration(TimeSpan? ts)
