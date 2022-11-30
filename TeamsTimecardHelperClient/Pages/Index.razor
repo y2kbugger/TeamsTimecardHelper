@@ -115,7 +115,7 @@
         var total = new TimeSpan();
         foreach (var tc in current_timecards)
         {
-            total = total + HoursFromTimeCard(tc);
+            total += HoursFromTimeCard(tc);
         }
 
         // This is required to stop blazor from infinitely re-rendering the page
@@ -123,11 +123,22 @@
     }
     private TimeSpan HoursFromTimeCard(TimeCard tc)
     {
-            DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("ClockInEvent.DateTime should never not be null");
-            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow;
+            DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("TimeCard.ClockInEvent.DateTime should never not be null");
+            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow; // Still clocked in
             var hours = (dt_out - dt_in);
-            // todo handle breaks
+
+            foreach (var b in tc?.Breaks ?? Enumerable.Empty<TimeCardBreak>())
+                hours  -=  HoursFromTimeCardBreak(b);
+
             return hours;
+    }
+
+    private TimeSpan HoursFromTimeCardBreak(TimeCardBreak tcb)
+    {
+        DateTime dt_in = tcb!.Start?.DateTime?.DateTime ?? throw new Exception("TimeCardBreak.Start.DateTime should never not be null");
+        DateTime dt_out = tcb?.End?.DateTime?.DateTime ?? DateTime.UtcNow; // Still on break
+        var hours = (dt_out - dt_in);
+        return hours;
     }
 
     private string FormatDuration(TimeSpan? ts)
