@@ -157,7 +157,11 @@
     protected override async Task OnInitializedAsync()
     {
         if (theteamid == null)
+        {
+            Console.WriteLine("No team selected, redirecting to settings");
             nav.NavigateTo("settings");
+            return; // or else code below will still run
+        }
 
         await FetchAllTimecards();
 
