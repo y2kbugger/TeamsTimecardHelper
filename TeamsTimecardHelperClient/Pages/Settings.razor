@@ -1,0 +1,30 @@
+﻿@page "/settings"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Graph
+@attribute [Authorize]
+@inject GraphServiceClient graphclient
+@inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+
+<a href="/">Back</a>
+<h1>Settings</h1>
+
+<label>Choose your team
+<RadzenDropDown
+    Data=@teams @bind-Value=@theteamid
+    TextProperty="DisplayName" ValueProperty="Id" /></label>
+
+@code {
+    string? theteamid {
+        get => localstorage.GetItem<string>("theteamid");
+        set => localstorage.SetItem("theteamid", value);
+    }
+    private IUserJoinedTeamsCollectionWithReferencesPage? teams;
+    protected override async Task OnInitializedAsync()
+    {
+        teams = await graphclient.Me.JoinedTeams
+        .Request()
+        .GetAsync();
+        if (theteamid == null && teams.Count > 0)
+            theteamid =  teams[0].Id;
+    }
+}

@@ -2,8 +2,9 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
-@inject GraphServiceClient GraphClient
+@inject GraphServiceClient graphclient
 @inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+@inject NavigationManager nav
 
 <div class="container">
     <div class="row justify-content-end">
@@ -11,10 +12,6 @@
         <RadzenDatePicker DateRender=@DateRenderSundays
             TValue="DateTime" @bind-Value=@StartOfWeek
             DateFormat="yyyy-MM-dd"
-            Class="col-md-2 m-1" />
-
-        <RadzenDropDown Data=@teams @bind-Value=@theteamid
-            Change="FetchAllTimecards" TextProperty="DisplayName" ValueProperty="Id"
             Class="col-md-2 m-1" />
     </div>
 </div>
@@ -98,7 +95,6 @@
 @code {
     string? theteamid {
         get => localstorage.GetItem<string>("theteamid");
-        set => localstorage.SetItem("theteamid", value);
     }
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private IScheduleTimeCardsCollectionPage? timecards;
@@ -161,17 +157,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var user = await GraphClient.Me
-        .Request()
-        .GetAsync();
-        StateHasChanged();
-
-        teams = await GraphClient.Me.JoinedTeams
-        .Request()
-        .GetAsync();
-        if (theteamid == null && teams.Count > 0)
-            theteamid =  teams[0].Id;
-        StateHasChanged();
+        if (theteamid == null)
+            nav.NavigateTo("settings");
 
         await FetchAllTimecards();
 
@@ -184,7 +171,7 @@
 
     private async Task FetchAllTimecards()
     {
-        timecards = await GraphClient.Teams[theteamid].Schedule.TimeCards
+        timecards = await graphclient.Teams[theteamid].Schedule.TimeCards
             .Request()
             @* None of these query options currently work in the beta API *@
             @* .Filter(@"clockinEvent/dateTime ge '2022-11-22'") *@
