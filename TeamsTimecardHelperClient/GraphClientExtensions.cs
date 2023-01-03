@@ -94,4 +94,17 @@ internal static class GraphClientExtensions
             return http.SendAsync(request, completionOption, cancellationToken);
         }
     }
+
+    public static bool IsSuccessStatusCode(this System.Net.HttpStatusCode statusCode)
+    {
+        return ((int)statusCode >= 200) && ((int)statusCode <= 299);
+    }
+
+    public static void EnsureSuccessStatusCode(this System.Net.HttpStatusCode statusCode)
+    {
+        if (!statusCode.IsSuccessStatusCode())
+        {
+            throw new Exception($"Status code not a success: {statusCode}");
+        }
+    }
 }
