@@ -27,13 +27,16 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
 
 @code {
     [Parameter]
-    public required string TeamId { get; set; }
+    public required string? TeamId { get; set; }
     private bool busy = true;
     private const TimeCardState TimeCardStateUnknown = (TimeCardState)9901;
     private const TimeCardState TimeCardStateNoActiveTimeCard = (TimeCardState)9902;
     private TimeCard active_timecard = new TimeCard() { State = TimeCardStateUnknown };
     private async Task FetchActiveTimecard()
     {
+        if (TeamId == null)
+            return;
+
         busy = true; StateHasChanged();
         var tcs = await GraphClient.Teams[TeamId].Schedule.TimeCards
             .Request()
