@@ -1,0 +1,133 @@
+@using System.Net
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Graph
+@inject GraphServiceClient GraphClient
+
+@if (active_timecard.State == TimeCardStateUnknown)
+{
+    <div>Loading...</div>
+}
+else if (active_timecard.State == TimeCardStateNoActiveTimeCard)
+{
+    <RadzenButton Text="Clock In" IsBusy=@busy Click=@HandleClockIn Class="col-md-2 m-1" />
+}
+else if (active_timecard.State == TimeCardState.ClockedIn)
+{
+    <RadzenButton Text="Clock Out" IsBusy=@busy Click=@HandleClockOut Class="col-md-2 m-1" />
+    <RadzenButton Text="Start Break" IsBusy=@busy Click=@HandleStartBreak Class="col-md-2 m-1" />
+}
+else if (active_timecard.State == TimeCardState.OnBreak)
+{
+    <RadzenButton Text="End Break" IsBusy=@busy Click=@HandleEndBreak Class="col-md-2 m-1" />
+}
+else if (active_timecard.State == TimeCardState.ClockedOut)
+{
+    <div>Clocked out timecard should not be active. Please refresh the page.</div>
+}
+
+@code {
+    [Parameter]
+    public required string TeamId { get; set; }
+    private bool busy = false;
+    private const TimeCardState TimeCardStateUnknown = (TimeCardState)9901;
+    private const TimeCardState TimeCardStateNoActiveTimeCard = (TimeCardState)9902;
+    private TimeCard active_timecard = new TimeCard() { State = TimeCardStateUnknown };
+    private async Task FetchActiveTimecard()
+    {
+        var tcs = await GraphClient.Teams[TeamId].Schedule.TimeCards
+            .Request()
+            .Filter("state eq 'clockedIn'")
+            .Top(1)
+            .GetAsync();
+
+        // api doesnt support 'or' or not equal, so we have to do this
+        // M$ == Clowns
+        if (tcs.Count == 0)
+            tcs = await GraphClient.Teams[TeamId].Schedule.TimeCards
+                .Request()
+                .Filter("state eq 'onBreak'")
+                .Top(1)
+                .GetAsync();
+
+        if (tcs.Count == 0)
+            active_timecard = new TimeCard() { State = TimeCardStateNoActiveTimeCard };
+        else if (tcs.Count == 1)
+            active_timecard = tcs[0];
+        else if (tcs.Count > 1)
+            throw new Exception("More than one active timecard");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await FetchActiveTimecard();
+    }
+
+    private async Task HandleClockIn()
+    {
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var resp = await GraphClient.Teams[TeamId].Schedule.TimeCards.ClockIn()
+                .Request()
+                .PostResponseAsync();
+            resp.StatusCode.EnsureSuccessStatusCode();
+            active_timecard = await resp.GetResponseObjectAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+    private async Task HandleClockOut()
+    {
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var resp = await GraphClient.Teams[TeamId].Schedule.TimeCards[active_timecard.Id].ClockOut()
+                .Request()
+                .PostResponseAsync();
+            resp.StatusCode.EnsureSuccessStatusCode();
+            active_timecard = new TimeCard { State = TimeCardStateNoActiveTimeCard };
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+    private async Task HandleStartBreak()
+    {
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var resp = await GraphClient.Teams[TeamId].Schedule.TimeCards[active_timecard.Id].StartBreak()
+                .Request()
+                .PostResponseAsync();
+            resp.StatusCode.EnsureSuccessStatusCode();
+            active_timecard.State = TimeCardState.OnBreak;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+    private async Task HandleEndBreak()
+    {
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var resp = await GraphClient.Teams[TeamId].Schedule.TimeCards[active_timecard.Id].EndBreak()
+                .Request()
+                .PostResponseAsync();
+            resp.StatusCode.EnsureSuccessStatusCode();
+            active_timecard.State = TimeCardState.ClockedIn;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

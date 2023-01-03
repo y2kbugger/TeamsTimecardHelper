@@ -1,4 +1,4 @@
-@page "/"
+﻿@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
@@ -7,6 +7,7 @@
 
 <div class="container">
     <div class="row justify-content-end">
+        <ClockInOut TeamId=@theteamid />
         <RadzenDatePicker DateRender=@DateRenderSundays
             TValue="DateTime" @bind-Value=@StartOfWeek
             DateFormat="yyyy-MM-dd"
