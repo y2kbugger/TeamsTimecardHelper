@@ -4,6 +4,7 @@
 @attribute [Authorize]
 @inject GraphServiceClient graphclient
 @inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+@inject NavigationManager nav
 
 <a href="/">Back</a>
 <h1>Settings</h1>
@@ -19,7 +20,10 @@
 @code {
     string? theteamid {
         get => localstorage.GetItem<string>("theteamid");
-        set => localstorage.SetItem("theteamid", value);
+        set {
+            localstorage.SetItem("theteamid", value);
+            nav.NavigateTo("/");
+        }
     }
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     protected override async Task OnInitializedAsync()
@@ -27,7 +31,5 @@
         teams = await graphclient.Me.JoinedTeams
         .Request()
         .GetAsync();
-        if (theteamid == null && teams.Count > 0)
-            theteamid =  teams[0].Id;
     }
 }
