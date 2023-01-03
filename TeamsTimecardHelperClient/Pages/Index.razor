@@ -173,14 +173,12 @@
         StateHasChanged();
 
         await FetchAllTimecards();
-        StateHasChanged();
 
-        var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        // This updates the clock calculations periodically
+        var update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(3));
 
-        while (await timer.WaitForNextTickAsync())
-        {
-            StateHasChanged();
-        }
+        // This updates timecards on a longer interval
+        var update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
     }
 
     private async Task FetchAllTimecards()
@@ -202,5 +200,6 @@
                 timecards = null;
         }
         all_timecards = my_timecards;
+        StateHasChanged();
     }
 }
