@@ -84,7 +84,6 @@
         <SummaryTemplate>
             @if (theteamid != null)
             {
-                <p> Selected Team: <b>@(teams?.First(t=>t.Id==theteamid)?.DisplayName ?? "~")</b></p>
                 <p> All Timecards: <b>@(all_timecards?.Count ?? 0)</b></p>
                 <p> Current Timecards: <b>@(current_timecards?.Count ?? 0)</b></p>
             }
