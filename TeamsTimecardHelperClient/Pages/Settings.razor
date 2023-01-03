@@ -7,11 +7,14 @@
 
 <a href="/">Back</a>
 <h1>Settings</h1>
-
-<label>Choose your team
-<RadzenDropDown
-    Data=@teams @bind-Value=@theteamid
-    TextProperty="DisplayName" ValueProperty="Id" /></label>
+<form>
+    <div>
+        <RadzenLabel Text="Choose your Team:" Component="team-dropdown" class="align-middle"/>
+        <RadzenDropDown Name="team-dropdown"
+            Data=@teams @bind-Value=@theteamid
+            TextProperty="DisplayName" ValueProperty="Id" class="align-middle"/>
+    </div>
+</form>
 
 @code {
     string? theteamid {
