@@ -1,8 +1,9 @@
-﻿@page "/"
+@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
 @inject GraphServiceClient GraphClient
+@inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
 
 <div class="container">
     <div class="row justify-content-end">
@@ -94,7 +95,10 @@
 </RadzenCard>
 
 @code {
-    string? theteamid;
+    string? theteamid {
+        get => localstorage.GetItem<string>("theteamid");
+        set => localstorage.SetItem("theteamid", value);
+    }
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private IScheduleTimeCardsCollectionPage? timecards;
 
@@ -164,7 +168,8 @@
         teams = await GraphClient.Me.JoinedTeams
         .Request()
         .GetAsync();
-        theteamid =  teams[1].Id;
+        if (theteamid == null && teams.Count > 0)
+            theteamid =  teams[0].Id;
         StateHasChanged();
 
         await FetchAllTimecards();
