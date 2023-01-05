@@ -44,20 +44,6 @@
             <h2>Technical Details</h2>
         </HeaderTemplate>
         <ChildContent>
-            @if (teams != null)
-            {
-                <h2>All Teams</h2>
-                foreach (var team in teams)
-                {
-                    <p>team: @team.DisplayName</p>
-                }
-            }
-            @if (theteamid != null)
-            {
-                <h2>Selected Team</h2>
-                <p>teamId: @theteamid</p>
-            }
-
             @if (current_timecards != null)
             {
                 <h2>Timecards</h2>
@@ -95,7 +81,6 @@
     string? theteamid {
         get => localstorage.GetItem<string>("theteamid");
     }
-    private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     private IScheduleTimeCardsCollectionPage? timecards;
 
     public DateTime StartOfWeek = DateTime.Today.AddDays(-1 * (7 + (DateTime.Today.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
@@ -154,6 +139,8 @@
         args.Disabled = args.Date.DayOfWeek != System.DayOfWeek.Sunday;
     }
 
+    Timer? update_datetimes_in_gui;
+    Timer? update_timecards;
     protected override async Task OnInitializedAsync()
     {
         if (theteamid == null)
@@ -166,14 +153,15 @@
         await FetchAllTimecards();
 
         // This updates the clock calculations periodically
-        var update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(3));
+        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(3));
 
         // This updates timecards on a longer interval
-        var update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
+        update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
     }
 
     private async Task FetchAllTimecards()
     {
+        Console.WriteLine("Fetching all timecards");
         timecards = await graphclient.Teams[theteamid].Schedule.TimeCards
             .Request()
             @* None of these query options currently work in the beta API *@
