@@ -1,10 +1,12 @@
 ﻿@page "/"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
+@using CurrieTechnologies.Razor.PageVisibility
 @attribute [Authorize]
 @inject GraphServiceClient graphclient
 @inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
 @inject NavigationManager nav
+@inject PageVisibilityService visibility
 
 <div class="container">
     <div class="row justify-content-end">
@@ -26,7 +28,7 @@
                             <span>@FormatDuration(total_timespan())</span>
                         </div>
                         <div class="totalhours-units">
-                            HH:MM
+                            HH:MM:SS
                         </div>
                     </div>
                 </Template>
@@ -129,9 +131,9 @@
     private string FormatDuration(TimeSpan? ts)
     {
         if (ts == null)
-            return "--:--";
+            return "--:--:--";
         var tss = (TimeSpan)ts;
-        return String.Format("{0:00}:{1:00}", (tss.Days * 24) + tss.Hours, tss.Minutes);
+        return $"{(tss.Days * 24) + tss.Hours:00}:{tss.Minutes:00}:{tss.Seconds:00}";
     }
 
     void DateRenderSundays(DateRenderEventArgs args)
@@ -141,6 +143,7 @@
 
     Timer? update_datetimes_in_gui;
     Timer? update_timecards;
+    Timer? update_timecards_if_vis;
     protected override async Task OnInitializedAsync()
     {
         if (theteamid == null)
@@ -150,16 +153,47 @@
             return; // or else code below will still run
         }
 
-        await FetchAllTimecards();
-
         // This updates the clock calculations periodically
-        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(3));
+        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 
         // This updates timecards on a longer interval
         update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
+        update_timecards_if_vis = new Timer(async _ => await FetchAllTimecardsIfVisible(), null, TimeSpan.Zero, TimeSpan.FromMinutes(4));
+
+        // This updates timecards when the page becomes visible
+        await visibility.OnVisibilityChangeAsync(async _ => await FetchAllTimecards(), this);
     }
 
+    private async Task FetchAllTimecardsIfVisible()
+    {
+        var vis = await visibility.GetVisibilityStateAsync();
+        if (vis == VisibilityState.Hidden)
+            Console.WriteLine("Hidden");
+        else
+            Console.WriteLine("Visible");
+
+        if (vis == VisibilityState.Hidden)
+            return;
+        else
+            await FetchAllTimecards();
+
+    }
+    private bool _fetchingtimecards = false;
     private async Task FetchAllTimecards()
+    {
+        if (_fetchingtimecards)
+            return;
+        _fetchingtimecards = true;
+        try
+        {
+            await _FetchAllTimecardsInner();
+        }
+        finally
+        {
+            _fetchingtimecards = false;
+        }
+    }
+    private async Task _FetchAllTimecardsInner()
     {
         Console.WriteLine("Fetching all timecards");
         timecards = await graphclient.Teams[theteamid].Schedule.TimeCards
