@@ -9,7 +9,7 @@
 @inject PageVisibilityService visibility
 
 <div class="container">
-    <div class="row justify-content-end">
+    <div class="row justify-content-end mb-3">
         <ClockInOut TeamId=@theteamid OnChangeState=@FetchAllTimecards/>
         <RadzenDatePicker DateRender=@DateRenderSundays
             TValue="DateTime" @bind-Value=@StartOfWeek
