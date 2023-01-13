@@ -10,7 +10,7 @@
 
 <div class="container">
     <div class="row justify-content-end">
-        <ClockInOut TeamId=@theteamid />
+        <ClockInOut TeamId=@theteamid OnChangeState=@FetchAllTimecards/>
         <RadzenDatePicker DateRender=@DateRenderSundays
             TValue="DateTime" @bind-Value=@StartOfWeek
             DateFormat="yyyy-MM-dd"
@@ -168,11 +168,6 @@
     {
         var vis = await visibility.GetVisibilityStateAsync();
         if (vis == VisibilityState.Hidden)
-            Console.WriteLine("Hidden");
-        else
-            Console.WriteLine("Visible");
-
-        if (vis == VisibilityState.Hidden)
             return;
         else
             await FetchAllTimecards();
@@ -183,9 +178,9 @@
     {
         if (_fetchingtimecards)
             return;
-        _fetchingtimecards = true;
         try
         {
+            _fetchingtimecards = true;
             await _FetchAllTimecardsInner();
         }
         finally
