@@ -158,34 +158,25 @@
 
         // This updates timecards on a longer interval
         update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
-        update_timecards_if_vis = new Timer(async _ => await FetchAllTimecardsIfVisible(), null, TimeSpan.Zero, TimeSpan.FromMinutes(4));
+        update_timecards_if_vis = new Timer(async _ => await visibility.RunIfVisibleAsync(FetchAllTimecards), null, TimeSpan.Zero, TimeSpan.FromMinutes(4));
 
         // This updates timecards when the page becomes visible
         await visibility.OnVisibilityChangeAsync(async _ => await FetchAllTimecards(), this);
     }
 
-    private async Task FetchAllTimecardsIfVisible()
-    {
-        var vis = await visibility.GetVisibilityStateAsync();
-        if (vis == VisibilityState.Hidden)
-            return;
-        else
-            await FetchAllTimecards();
-
-    }
-    private bool _fetchingtimecards = false;
+    private bool _fetching_alltimecards = false;
     private async Task FetchAllTimecards()
     {
-        if (_fetchingtimecards)
+        if (_fetching_alltimecards)
             return;
         try
         {
-            _fetchingtimecards = true;
+            _fetching_alltimecards = true;
             await _FetchAllTimecardsInner();
         }
         finally
         {
-            _fetchingtimecards = false;
+            _fetching_alltimecards = false;
         }
     }
     private async Task _FetchAllTimecardsInner()

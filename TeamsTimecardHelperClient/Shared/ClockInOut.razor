@@ -1,7 +1,7 @@
-@using System.Net
-@using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
+@using CurrieTechnologies.Razor.PageVisibility
 @inject GraphServiceClient GraphClient
+@inject PageVisibilityService visibility
 
 @if (active_timecard.State == TimeCardStateUnknown)
 {
@@ -35,7 +35,23 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
     private const TimeCardState TimeCardStateUnknown = (TimeCardState)9901;
     private const TimeCardState TimeCardStateNoActiveTimeCard = (TimeCardState)9902;
     private TimeCard active_timecard = new TimeCard() { State = TimeCardStateUnknown };
+
+    private bool _fetching_activetimecard = false;
     private async Task FetchActiveTimecard()
+    {
+        if (_fetching_activetimecard)
+            return;
+        try
+        {
+            _fetching_activetimecard = true;
+            await _FetchActiveTimecardInner();
+        }
+        finally
+        {
+            _fetching_activetimecard = false;
+        }
+    }
+    private async Task _FetchActiveTimecardInner()
     {
         if (TeamId == null)
             return;
@@ -65,9 +81,15 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
             throw new Exception("More than one active timecard");
     }
 
+    Timer? update_active_timecard;
+    Timer? update_active_timecard_if_vis;
     protected override async Task OnInitializedAsync()
     {
-        await FetchActiveTimecard();
+        update_active_timecard = new Timer(async _ => await FetchActiveTimecard(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
+        update_active_timecard_if_vis = new Timer(async _ => await visibility.RunIfVisibleAsync(FetchActiveTimecard), null, TimeSpan.Zero, TimeSpan.FromMinutes(4));
+
+        // This updates timecards when the page becomes visible
+        await visibility.OnVisibilityChangeAsync(async _ => await FetchActiveTimecard(), this);
     }
 
     private async Task HandleClockIn()
