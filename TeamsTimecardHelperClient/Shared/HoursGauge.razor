@@ -1,0 +1,37 @@
+@using Microsoft.Graph
+@using CurrieTechnologies.Razor.PageVisibility
+@using static TimeCardDuration
+@inject GraphServiceClient GraphClient
+@inject PageVisibilityService visibility
+
+<RadzenRadialGauge>
+    <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
+        <RadzenRadialGaugeScalePointer Value="@(TotalTimespan(TimeCards)?.TotalHours ?? 0)">
+            <Template Context="pointer">
+                <div class="totalhours-container">
+                    <div class="totalhours-value">
+                        <span>@FormatDuration(TotalTimespan(TimeCards))</span>
+                    </div>
+                    <div class="totalhours-units">
+                        HH:MM:SS
+                    </div>
+                </div>
+            </Template>
+        </RadzenRadialGaugeScalePointer>
+        <RadzenRadialGaugeScaleRange From="0" To="20" Fill="green" />
+        <RadzenRadialGaugeScaleRange From="20" To="25" Fill="orange" />
+        <RadzenRadialGaugeScaleRange From="25" To="30" Fill="red" />
+    </RadzenRadialGaugeScale>
+</RadzenRadialGauge>
+
+@code {
+    [Parameter]
+    public required IEnumerable<TimeCard>? TimeCards { get; set; }
+
+    Timer? update_datetimes_in_gui;
+    protected override void OnInitialized()
+    {
+        // This updates the clock every second
+        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    }
+}
