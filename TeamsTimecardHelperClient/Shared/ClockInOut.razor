@@ -5,7 +5,7 @@
 
 @if (active_timecard.State == TimeCardStateUnknown)
 {
-    <RadzenButton Text="" IsBusy=@busy Class="col-md-2 m-1" />
+    <RadzenButton Text="" IsBusy="true" Class="col-md-2 m-1" />
 }
 else if (active_timecard.State == TimeCardStateNoActiveTimeCard)
 {
@@ -31,7 +31,7 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
     [Parameter]
     public EventCallback OnChangeState { get; set; }
 
-    private bool busy = true;
+    private bool busy = false;
     private const TimeCardState TimeCardStateUnknown = (TimeCardState)9901;
     private const TimeCardState TimeCardStateNoActiveTimeCard = (TimeCardState)9902;
     private TimeCard active_timecard = new TimeCard() { State = TimeCardStateUnknown };
@@ -56,7 +56,6 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
         if (TeamId == null)
             return;
 
-        busy = true; StateHasChanged();
         var tcs = await GraphClient.Teams[TeamId].Schedule.TimeCards
             .Request()
             .Filter("state eq 'clockedIn'")
@@ -71,7 +70,6 @@ else if (active_timecard.State == TimeCardState.ClockedOut)
                 .Filter("state eq 'onBreak'")
                 .Top(1)
                 .GetAsync();
-        busy = false;
 
         if (tcs.Count == 0)
             active_timecard = new TimeCard() { State = TimeCardStateNoActiveTimeCard };
