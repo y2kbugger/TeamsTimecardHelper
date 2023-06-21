@@ -8,13 +8,13 @@
 
   <ItemGroup>
     <PackageReference Include="CurrieTechnologies.Razor.PageVisibility" Version="1.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="7.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="7.0.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="7.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="7.0.7" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="7.0.7" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="7.0.7" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="7.0.0" />
-    <PackageReference Include="Microsoft.Graph.Beta" Version="4.66.0-preview" />
+    <PackageReference Include="Microsoft.Graph.Beta" Version="4.73.1-preview" />
     <PackageReference Include="Blazored.LocalStorage" Version="4.3.0" />
-    <PackageReference Include="Radzen.Blazor" Version="4.3.8" />
+    <PackageReference Include="Radzen.Blazor" Version="4.13.3" />
   </ItemGroup>
 
   <ItemGroup>
