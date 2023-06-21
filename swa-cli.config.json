@@ -7,7 +7,9 @@
       "appBuildCommand": "dotnet publish -c Release -o bin",
       "run": "dotnet watch run",
       "appDevserverUrl": "https://localhost:7214",
-      "open": true
+      "resourceGroup": "rg-teamstimecardhelper",
+      "appName": "TeamsTimecardHelper",
+      "useKeychain": false
     }
   }
 }

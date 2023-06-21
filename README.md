@@ -13,3 +13,10 @@ As well as this to get the AzureAD/MSAL part after commiting
 
     cd TeamsTimecardHelperClient
     dotnet watch
+
+When developing on Radzen, dot a `dotnet build` in the Radzen folder at least once to make the css available.
+
+To deploy from CLI, goto the project root and run:
+
+    npx @azure/static-web-apps-cli build
+    npx @azure/static-web-apps-cli deploy --env Test
