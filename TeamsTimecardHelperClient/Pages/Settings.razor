@@ -10,7 +10,7 @@
 <h1>Settings</h1>
 <form>
     <div>
-        <RadzenLabel Text="Choose your Team that uses Shifts:" Component="team-dropdown" class="align-middle"/>
+        <RadzenLabel Text="Team that uses Shifts:" Component="team-dropdown" class="align-middle"/>
         <RadzenDropDown Name="team-dropdown"
             Data=@teams @bind-Value=@theteamid
             TextProperty="DisplayName" ValueProperty="Id" class="align-middle"/>
