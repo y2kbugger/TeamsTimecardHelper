@@ -96,8 +96,8 @@
         }
 
         // This updates timecards on a longer interval
-        update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(18));
-        update_timecards_if_vis = new Timer(async _ => await visibility.RunIfVisibleAsync(FetchAllTimecards), null, TimeSpan.Zero, TimeSpan.FromMinutes(4));
+        update_timecards = new Timer(async _ => await FetchAllTimecards(), null, TimeSpan.Zero, TimeSpan.FromMinutes(98));
+        update_timecards_if_vis = new Timer(async _ => await visibility.RunIfVisibleAsync(FetchAllTimecards), null, TimeSpan.Zero, TimeSpan.FromMinutes(24));
 
         // This updates timecards when the page becomes visible
         await visibility.OnVisibilityChangeAsync(async _ => await FetchAllTimecards(), this);
