@@ -1,0 +1,138 @@
+﻿@using Microsoft.Graph
+@using Microsoft.VisualBasic.FileIO
+@using System.Collections.Generic
+
+@inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+@inject GraphServiceClient GraphClient
+
+<form class="form-horizontal">
+    <h2>Upload CSV</h2>
+    <div>
+        <RadzenLabel Text="Validate Activity Project" Component="activity-project" class="align-middle"/>
+        <RadzenTextBox Name="activity-project" @bind-Value=@ActivityProject class="align-middle"/>
+        <InputFile OnChange="@LoadFile"/>
+    </div>
+    <div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Project</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var result in ActivityUploadResults)
+                {
+                    <tr>
+                        <td>@result.Description.Description</td>
+                        <td>@result.Description.Project</td>
+                        <td>@result.Description.StartTime</td>
+                        <td>@result.Description.EndTime</td>
+                        <td>@result.status</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</form>
+
+@code {
+    public record Activity(string Description, string Project, DateTimeOffset StartTime, DateTimeOffset EndTime);
+}
+@code {
+    public record ActivityUploadResult(Activity Description, string status);
+}
+@code {
+    string? ActivityProject
+    {
+        get => localstorage.GetItem<string>("activity-project");
+        set => localstorage.SetItem("activity-project", value);
+    }
+
+    private List<ActivityUploadResult> ActivityUploadResults = new List<ActivityUploadResult>();
+    private async Task LoadFile(InputFileChangeEventArgs e)
+    {
+        ActivityUploadResults.Clear();
+        var stream = e.File.OpenReadStream() ?? throw new Exception("Error uploading file");
+        await foreach (var row in ParseCSV(stream))
+        {
+            ActivityUploadResults.Add(await UploadActivity(row));
+            StateHasChanged();
+        }
+    }
+
+    private async Task<ActivityUploadResult> UploadActivity(Activity activity)
+    {
+        // Create a TimeCard based on the activity
+        var timeCard = new TimeCard
+        {
+            Notes = new ItemBody
+            {
+                Content = activity.Description,
+                ContentType = BodyType.Text
+            },
+            ClockInEvent = new TimeCardEvent
+            {
+                DateTime =  activity.StartTime,
+                AtApprovedLocation = true,
+            },
+            ClockOutEvent = new TimeCardEvent
+            {
+                DateTime = activity.EndTime,
+                AtApprovedLocation = true,
+            },
+        };
+
+        if (activity.Project != ActivityProject)
+            return new ActivityUploadResult(activity, "Skipped, project mismatch");
+
+        // Upload the TimeCard
+        Console.WriteLine($"Uploading {activity.Description}...");
+        var request =  GraphClient.Teams[localstorage.GetItem<string>("theteamid")].Schedule.TimeCards.Request();
+        var response = await request.AddAsync(timeCard);
+
+        if (response.Id == null)
+            return new ActivityUploadResult(activity, $"Error: Failed to upload.");
+
+        Console.WriteLine($"Uploaded {response}.");
+
+        return new ActivityUploadResult(activity, "Uploaded");
+    }
+
+    private async IAsyncEnumerable<Activity> ParseCSV(Stream csvData)
+    {
+        using var reader = new StreamReader(csvData);
+        var fileContent = await reader.ReadToEndAsync();
+
+        using var memoryStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(fileContent));
+        using var streamReader = new StreamReader(memoryStream);
+
+        using TextFieldParser parser = new TextFieldParser(streamReader);
+        parser.TextFieldType = FieldType.Delimited;
+        parser.SetDelimiters(",");
+
+        string[] headers = parser.ReadFields() ?? throw new Exception("Error parsing CSV");
+        if((headers[0] != "activity")
+        || (headers[1] != "project")
+        || (headers[9] != "start_time")
+        || (headers[10] != "end_time"))
+        {
+            throw new Exception("CSV header mismatch.");
+        }
+
+        while (!parser.EndOfData)
+        {
+            string[] fields = parser.ReadFields() ?? throw new Exception("Error parsing CSV");
+            Activity row = new Activity(
+                fields[0],
+                fields[1],
+                DateTimeOffset.Parse(fields[9]),
+                DateTimeOffset.Parse(fields[10])
+            );
+            yield return row;
+        }
+    }
+}
