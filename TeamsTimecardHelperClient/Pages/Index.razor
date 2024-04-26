@@ -21,8 +21,15 @@
     </div>
 </div>
 <h2 class="text-center">Timecard Total</h2>
-<div class="d-flex justify-content-center">
+<div class="d-flex flex-column justify-content-center mx-auto" style="max-width:fit-content">
     <HoursGauge TimeCards="@current_timecards" />
+    <p>Average Weekly Hours since @(new DateOnly(year:2024, month:1, day:31)): <b>@(FormatDuration(average_weekly_hours_since(new DateTime(year:2024, month:1, day:31))))</b></p>
+
+    @{ var excess = excess_hours_banked(new DateTime(year:2024, month:1, day:31), new TimeSpan(25, 0, 0)); }
+    @if (excess > new TimeSpan(0))
+    { <p>Excess Hours Banked: <b>@(FormatDuration(excess))</b></p> }
+    else
+    { <p>Behind by: <b>@(FormatDuration(-1 * excess))</b></p> }
 </div>
 
 <RadzenCard class="w-100 mt-3 p-3">
@@ -78,6 +85,27 @@
             x => (x.ClockInEvent.DateTime >= StartOfWeek)
             && (x.ClockInEvent.DateTime <= StartOfWeek.AddDays(7))
             ).ToList(); // todo: handle case where timecard spans midnight at end of week
+
+    private TimeSpan average_weekly_hours_since(DateTime start)
+    {
+        start = start.AddDays(-1 * (7 + (start.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
+        var weeks_since_start_week = 1+((StartOfWeek - start).TotalDays / 7);
+        var timecards_since_start_week = all_timecards?.Where(
+            x => (x.ClockInEvent.DateTime >= start)
+            && (x.ClockInEvent.DateTime <= StartOfWeek.AddDays(7))
+            ).ToList();
+        TimeSpan hours_since_start_week = TotalTimespan(timecards_since_start_week) ?? new TimeSpan();
+        return hours_since_start_week / weeks_since_start_week;
+    }
+    private TimeSpan excess_hours_banked(DateTime start, TimeSpan target_weekly_hours)
+    {
+        start = start.AddDays(-1 * (7 + (start.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
+        var weeks_since_start_week = 1+((StartOfWeek - start).TotalDays / 7);
+
+        var target_hours = weeks_since_start_week * target_weekly_hours;
+        var actual_hours = weeks_since_start_week * average_weekly_hours_since(start);
+        return actual_hours - target_hours;
+    }
 
     void DateRenderSundays(DateRenderEventArgs args)
     {
