@@ -5,8 +5,8 @@
 @inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
 @inject GraphServiceClient GraphClient
 
-<form class="form-horizontal">
-    <h2>Upload CSV</h2>
+<form class="form-horizontal card p-3 mt-5">
+    <h1>Upload CSV</h1>
     <div>
         <RadzenLabel Text="Validate Activity Project" Component="activity-project" class="align-middle"/>
         <RadzenTextBox Name="activity-project" @bind-Value=@ActivityProject class="align-middle"/>
