@@ -7,13 +7,13 @@
 @using static TimeCardDuration
 
 @inject GraphServiceClient graphclient
-@inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+@inject ClientSettings clientsettings
 @inject NavigationManager nav
 @inject PageVisibilityService visibility
 
 <div class="container">
     <div class="row justify-content-end mb-3">
-        <ClockInOut TeamId=@theteamid OnChangeState=@FetchAllTimecards/>
+        <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
         <RadzenDatePicker DateRender=@DateRenderSundays
             TValue="DateTime" @bind-Value=@StartOfWeek
             DateFormat="yyyy-MM-dd"
@@ -62,7 +62,7 @@
             }
         </ChildContent>
         <SummaryTemplate>
-            @if (theteamid != null)
+            @if (clientsettings.theteamid != null)
             {
                 <p> All Timecards: <b>@(all_timecards?.Count ?? 0)</b></p>
                 <p> Current Timecards: <b>@(current_timecards?.Count ?? 0)</b></p>
@@ -72,9 +72,6 @@
 </RadzenCard>
 
 @code {
-    string? theteamid {
-        get => localstorage.GetItem<string>("theteamid");
-    }
     private IScheduleTimeCardsCollectionPage? timecards;
 
     public DateTime StartOfWeek = DateTime.Today.AddDays(-1 * (7 + (DateTime.Today.DayOfWeek - System.DayOfWeek.Sunday)) % 7).Date;
@@ -116,7 +113,7 @@
     Timer? update_timecards_if_vis;
     protected override async Task OnInitializedAsync()
     {
-        if (theteamid == null)
+        if (clientsettings.theteamid == null)
         {
             Console.WriteLine("No team selected, redirecting to settings");
             nav.NavigateTo("settings");
@@ -149,7 +146,7 @@
     private async Task _FetchAllTimecardsInner()
     {
         Console.WriteLine("Fetching all timecards");
-        timecards = await graphclient.Teams[theteamid].Schedule.TimeCards
+        timecards = await graphclient.Teams[clientsettings.theteamid].Schedule.TimeCards
             .Request()
             @* None of these query options currently work in the beta API *@
             @* .Filter(@"clockinEvent/dateTime ge '2022-11-22'") *@

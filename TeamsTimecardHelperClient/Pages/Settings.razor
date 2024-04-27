@@ -1,32 +1,28 @@
-﻿@page "/settings"
+@page "/settings"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
 @inject GraphServiceClient graphclient
-@inject Blazored.LocalStorage.ISyncLocalStorageService localstorage
+@inject ClientSettings clientsettings
 @inject NavigationManager nav
 
+<div class="d-flex" style="align-items:center; gap: 1.4em;">
+    <h1>Settings</h1>
 <a href="/">Back</a>
-<h1>Settings</h1>
+</div>
 <form>
     <div>
         <RadzenLabel Text="Team that uses Shifts:" Component="team-dropdown" class="align-middle"/>
         <RadzenDropDown Name="team-dropdown"
-            Data=@teams @bind-Value=@theteamid
-            TextProperty="DisplayName" ValueProperty="Id" class="align-middle"/>
+            Data=@teams TextProperty="DisplayName" ValueProperty="Id"
+            @bind-Value=@clientsettings.theteamid
+            class="align-middle"/>
     </div>
 </form>
 
 <UploadCSV />
 
 @code {
-    string? theteamid {
-        get => localstorage.GetItem<string>("theteamid");
-        set {
-            localstorage.SetItem("theteamid", value);
-            nav.NavigateTo("/");
-        }
-    }
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     protected override async Task OnInitializedAsync()
     {
