@@ -1,4 +1,4 @@
-@page "/settings"
+﻿@page "/settings"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.Graph
 @attribute [Authorize]
@@ -8,7 +8,7 @@
 
 <div class="d-flex" style="align-items:center; gap: 1.4em;">
     <h1>Settings</h1>
-<a href="/">Back</a>
+    <a href="/">Back</a>
 </div>
 <form>
     <div>
@@ -18,11 +18,28 @@
             @bind-Value=@clientsettings.theteamid
             class="align-middle"/>
     </div>
+    <div>
+        <RadzenLabel Text="Stats Start Date:" Component="stats-start-date" class="align-middle"/>
+        <RadzenDatePicker Name="stats-start-date" ShowTime="false" DateFormat="d"
+            @bind-Value=@statsstartdate_backing
+            class="align-middle"/>
+    </div>
+    <div>
+        <RadzenLabel Text="Target Weekly Hours:" Component="target-weekly-hours" class="align-middle"/>
+        <RadzenNumeric Name="target-weekly-hours"
+            @bind-Value=@clientsettings.targetweeklyhours
+            class="align-middle"/>
+    </div>
 </form>
 
 <UploadCSV />
 
 @code {
+    DateTime statsstartdate_backing
+    {
+        get => clientsettings.statsstartdate.ToDateTime(TimeOnly.MinValue);
+        set => clientsettings.statsstartdate = DateOnly.FromDateTime(value);
+    }
     private IUserJoinedTeamsCollectionWithReferencesPage? teams;
     protected override async Task OnInitializedAsync()
     {

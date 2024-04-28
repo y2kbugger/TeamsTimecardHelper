@@ -2,10 +2,19 @@
 @using CurrieTechnologies.Razor.PageVisibility
 @using static TimeCardDuration
 @inject GraphServiceClient GraphClient
+@inject ClientSettings clientsettings
 @inject PageVisibilityService visibility
 
 <RadzenRadialGauge>
-    <RadzenRadialGaugeScale Min="0" Max="30" Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
+    @{
+        int target = clientsettings.targetweeklyhours;
+        int lower = target - 5;
+        // snap to the nearest 5
+        lower = (lower / 5) * 5;
+        int upper = target + 5;
+        upper = (upper / 5) * 5;
+    }
+    <RadzenRadialGaugeScale Min="0" Max=@upper Step=5 TickPosition="GaugeTickPosition.Outside" MinorStep="1">
         <RadzenRadialGaugeScalePointer Value="@(TotalTimespan(TimeCards)?.TotalHours ?? 0)">
             <Template Context="pointer">
                 <div class="totalhours-container">
@@ -18,9 +27,9 @@
                 </div>
             </Template>
         </RadzenRadialGaugeScalePointer>
-        <RadzenRadialGaugeScaleRange From="0" To="20" Fill="green" />
-        <RadzenRadialGaugeScaleRange From="20" To="25" Fill="orange" />
-        <RadzenRadialGaugeScaleRange From="25" To="30" Fill="red" />
+        <RadzenRadialGaugeScaleRange From="0" To=@lower Fill="green" />
+        <RadzenRadialGaugeScaleRange From=@lower To=@target Fill="orange" />
+        <RadzenRadialGaugeScaleRange From=@target To=@upper Fill="red" />
     </RadzenRadialGaugeScale>
 </RadzenRadialGauge>
 
