@@ -5,20 +5,22 @@
 
 @if (active_timecard.State == TimeCardStateUnknown)
 {
-    <RadzenButton Text="" IsBusy="true" Class="col-md-2 m-1" />
+    <RadzenButton Text="" IsBusy="true" Class="col-md-4 m-1" />
 }
 else if (active_timecard.State == TimeCardStateNoActiveTimeCard)
 {
-    <RadzenButton Text="Clock In" IsBusy=@busy Click=@HandleClockIn Class="col-md-2 m-1" />
+    <RadzenButton Text="Clock In" IsBusy=@busy Click=@HandleClockIn Class="col-md-4 m-1" />
+    <span Class="col-md-4 m-1" />
 }
 else if (active_timecard.State == TimeCardState.ClockedIn)
 {
-    <RadzenButton Text="Clock Out" IsBusy=@busy Click=@HandleClockOut Class="col-md-2 m-1" />
-    <RadzenButton Text="Start Break" IsBusy=@busy Click=@HandleStartBreak Class="col-md-2 m-1" />
+    <RadzenButton Text="Clock Out" IsBusy=@busy Click=@HandleClockOut Class="col-md-4 m-1" />
+    <RadzenButton Text="Start Break" IsBusy=@busy Click=@HandleStartBreak Class="col-md-4 m-1" />
 }
 else if (active_timecard.State == TimeCardState.OnBreak)
 {
-    <RadzenButton Text="End Break" IsBusy=@busy Click=@HandleEndBreak Class="col-md-2 m-1" />
+    <span Class="col-md-4 m-1" />
+    <RadzenButton Text="End Break" IsBusy=@busy Click=@HandleEndBreak Class="col-md-4 m-1" />
 }
 else if (active_timecard.State == TimeCardState.ClockedOut)
 {
