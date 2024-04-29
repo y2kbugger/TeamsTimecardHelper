@@ -5,6 +5,9 @@
 @inject ClientSettings clientsettings
 @inject PageVisibilityService visibility
 
+
+<div class="d-flex flex-column">
+<h2 class="text-center">Timecard Total</h2>
 <RadzenRadialGauge>
     @{
         int target = clientsettings.targetweeklyhours;
@@ -32,6 +35,7 @@
         <RadzenRadialGaugeScaleRange From=@target To=@upper Fill="red" />
     </RadzenRadialGaugeScale>
 </RadzenRadialGauge>
+</div>
 
 @code {
     [Parameter]

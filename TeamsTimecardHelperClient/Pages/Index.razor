@@ -13,18 +13,16 @@
 
 <PageTitle> This Week: @FormatDuration(TotalTimespan(current_timecards)) </PageTitle>
 
-<div class="container">
-    <div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 30em;">
-        <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
-        <RadzenDatePicker DateRender=@DateRenderSundays
-            TValue="DateTime" @bind-Value=@StartOfWeek
-            DateFormat="yyyy-MM-dd"
-            Class="col-md-3 m-1" />
-    </div>
+<div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 30em;">
+    <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
+    <RadzenDatePicker DateRender=@DateRenderSundays
+        TValue="DateTime" @bind-Value=@StartOfWeek
+        DateFormat="yyyy-MM-dd"
+        Class="col-md-3 m-1" />
 </div>
-<h2 class="text-center">Timecard Total</h2>
-<div class="d-flex flex-column justify-content-center mx-auto" style="max-width:fit-content">
+<div class="d-flex flex-row mx-auto" style="max-width:fit-content">
     <HoursGauge TimeCards="@current_timecards" />
+    <div class="divider mx-5" style="width:1px; background-color: #8b8b8b"></div>
     <div class="mx-auto">
         <h6>Since <em>@clientsettings.statsstartdate:</em></h6>
         <div class="mx-auto">
@@ -42,6 +40,7 @@
 @if (current_timecards != null)
 {
     int timecard_ix = 0;
+
     @foreach (var timecard in current_timecards.OrderByDescending(x => x.ClockInEvent.DateTime))
     {
         var clockin = timecard.ClockInEvent.DateTime!.Value.ToLocalTime();
