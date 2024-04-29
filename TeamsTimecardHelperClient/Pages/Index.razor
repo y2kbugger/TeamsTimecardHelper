@@ -14,12 +14,12 @@
 
 <PageTitle> This Week: @FormatDuration(TotalTimespan(current_timecards)) </PageTitle>
 
-<div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 30em;">
+<div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 40em;">
     <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
     <RadzenDatePicker DateRender=@DateRenderSundays
         TValue="DateTime" @bind-Value=@StartOfWeek
         DateFormat="yyyy-MM-dd"
-        Class="col-md-3 m-1" />
+        Class="col-3 m-1" />
 </div>
 <div class="d-flex flex-row mx-auto" style="max-width:fit-content">
     <HoursGauge TimeCards="@current_timecards" />
