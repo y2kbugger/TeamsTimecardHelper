@@ -12,7 +12,7 @@
 @inject NavigationManager nav
 @inject PageVisibilityService visibility
 
-<PageTitle> This Week: @FormatDuration(TotalTimespan(current_timecards)) </PageTitle>
+<PageTitle> @FormatDuration(TotalTimespan(current_timecards))</PageTitle>
 
 <div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 40em;">
     <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
