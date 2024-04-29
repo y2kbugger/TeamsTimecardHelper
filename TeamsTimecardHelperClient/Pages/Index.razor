@@ -11,6 +11,8 @@
 @inject NavigationManager nav
 @inject PageVisibilityService visibility
 
+<PageTitle> This Week: @FormatDuration(TotalTimespan(current_timecards)) </PageTitle>
+
 <div class="container">
     <div class="row justify-content-end mb-3">
         <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
@@ -23,56 +25,106 @@
 <h2 class="text-center">Timecard Total</h2>
 <div class="d-flex flex-column justify-content-center mx-auto" style="max-width:fit-content">
     <HoursGauge TimeCards="@current_timecards" />
-    <h6>Since <em>@clientsettings.statsstartdate:</em></h6>
-    <div class="ms-3">
-    <p class="m-0"> <small>Average: <em>@(average_weekly_hours_since(clientsettings.statsstartdate).TotalHours.ToString("F1")) hr/wk</em></small> </p>
-    @{ var excess = excess_hours_banked(clientsettings.statsstartdate, new TimeSpan(clientsettings.targetweeklyhours, 0, 0)); }
-    @if (excess > new TimeSpan(0))
-    { <p class="m-0"><small>Excess Hours Banked: <em>@(FormatDuration(excess))</em></small></p>}
-    else
-    { <p class="m-0"><small>Behind by: <em>@(FormatDuration(-1 * excess))</em></small></p>}
-    <p class="m-0 ms-4" style="color:rgb(93, 93, 93)"><small>@@@clientsettings.targetweeklyhours hr/wk</small></p>
+    <div class="mx-auto">
+        <h6>Since <em>@clientsettings.statsstartdate:</em></h6>
+        <div class="mx-auto">
+            <p class="mx-auto"> <small>Average: <em>@(average_weekly_hours_since(clientsettings.statsstartdate).TotalHours.ToString("F1")) hr/wk</em></small> </p>
+            @{ var excess = excess_hours_banked(clientsettings.statsstartdate, new TimeSpan(clientsettings.targetweeklyhours, 0, 0)); }
+            @if (excess > new TimeSpan(0))
+            { <p class="mx-auto"><small>Excess Hours Banked: <em>@(FormatDurationShort(excess))</em></small></p>}
+            else
+            { <p class="mx-auto"><small>Behind by: <em>@(FormatDurationShort(-1 * excess))</em></small></p>}
+            <p class="mx-auto" style="color:rgb(93, 93, 93)"><small>@@@clientsettings.targetweeklyhours hr/wk</small></p>
+        </div>
     </div>
 </div>
 
-<RadzenCard class="w-100 mt-3 p-3">
-    <RadzenPanel Collapsed="true" AllowCollapse="true">
-        <HeaderTemplate>
-            <h2>Technical Details</h2>
-        </HeaderTemplate>
-        <ChildContent>
-            @if (current_timecards != null)
-            {
-                <h2>Timecards</h2>
-                <table>
-                    <tr>
-                        <th>Id</th>
-                        <th>Start</th>
-                        <th>End</th>
-                        <th>Hours</th>
-                    </tr>
+@if (current_timecards != null)
+{
+    int timecard_ix = 0;
+    @foreach (var timecard in current_timecards.OrderByDescending(x => x.ClockInEvent.DateTime))
+    {
+        var clockin = timecard.ClockInEvent.DateTime!.Value.ToLocalTime();
+        var clockout = timecard.ClockOutEvent?.DateTime!.Value.ToLocalTime();
+        var mytimecard_ix = timecard_ix++;
+        <RadzenCard class="card w-80 my-3 p-3 mx-auto" style="width: 700px;">
+            <RadzenPanel Collapsed=@(mytimecard_ix!=0) AllowCollapse="true">
+                <HeaderTemplate>
+                    <span class="flex-grow-1">
+                        <em>@clockin.ToString("yyyy-MM-dd")</em><span class="me-2">:</span><b>@clockin.ToString("t")</b><span class="mx-2">-</span><b>@(clockout?.ToString("t") ?? "Still clocked in")</b>
+                    </span>
+                    <span class="font-monospace px-5 h4 my-0">
+                        @(FormatDurationShort(HoursFromTimeCard(timecard)))
+                    </span>
+                </HeaderTemplate>
+                <ChildContent>
+                    <hr/>
+                    <form class="m-4">
+                        <div class="mb-3 row">
+                            <label for="clockindatetime" class="col-sm-2 col-form-label pt-0 text-end"><b>Clock in</b></label>
+                            <div class="col-sm-10">
+                                <input
+                                    type="datetime-local"
+                                    value=@(clockin.ToString("yyyy-MM-ddTHH:mm:ss"))
+                                    @onchange=@(async (ChangeEventArgs e) => await update_start_and_end_time_for_timecard(timecard.Id, DateTime.Parse((string)e.Value!).ToUniversalTime(), timecard.ClockOutEvent?.DateTime)) />
+                            </div>
+                        </div>
+                        @if(clockout != null)
+                        {
+                        <div class="mb-3 row">
+                            <label for="clockoutdatetime" class="col-sm-2 col-form-label pt-0 text-end"><b>Clock out</b></label>
+                            <div class="col-sm-10">
+                            <input
+                                type="datetime-local"
+                                value=@(clockout.Value.ToString("yyyy-MM-ddTHH:mm:ss"))
+                                @onchange=@(async (ChangeEventArgs e) => await update_start_and_end_time_for_timecard(timecard.Id, timecard.ClockInEvent.DateTime!.Value, DateTime.Parse((string)e.Value!).ToUniversalTime() )) />
+                            </div>
+                        </div>
+                        }
+                    </form>
+                    <pre class="card m-2 p-2">
+                        @(timecard.Notes?.Content ?? "No notes.")
+                    </pre>
 
-                    @foreach (var timecard in current_timecards)
+                    @if (timecard.Breaks.Count() > 0)
                     {
-                        <tr>
-                            <td>@timecard.Id</td>
-                            <td>@timecard.ClockInEvent.DateTime</td>
-                            <td>@(timecard.ClockOutEvent != null ? timecard.ClockOutEvent.DateTime : "~")</td>
-                            <td>@(FormatDuration(HoursFromTimeCard(timecard)))</td>
-                        </tr>
+                        <div class="mt-5">
+                            <h4 class="pt-1">Break Details</h4>
+                            <table class="table">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>Start Time</th>
+                                        <th>End Time</th>
+                                        <th>Duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var breaktime in timecard.Breaks)
+                                    {
+                                        <tr>
+                                            <td>@breaktime.Start.DateTime!.Value.ToLocalTime().ToString("t")</td>
+                                            <td>@(breaktime.End != null ? breaktime.End.DateTime!.Value.ToLocalTime().ToString("t") : "Still on break")</td>
+                                            @if(breaktime.End != null)
+                                            {
+                                                <td>@(FormatDurationShort(breaktime.End.DateTime - breaktime.Start.DateTime))</td>
+                                            }
+                                            else
+                                            {
+                                                <td>@(FormatDurationShort(DateTime.UtcNow - breaktime.Start.DateTime))</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     }
-                </table>
-            }
-        </ChildContent>
-        <SummaryTemplate>
-            @if (clientsettings.theteamid != null)
-            {
-                <p> All Timecards: <b>@(all_timecards?.Count ?? 0)</b></p>
-                <p> Current Timecards: <b>@(current_timecards?.Count ?? 0)</b></p>
-            }
-        </SummaryTemplate>
-    </RadzenPanel>
-</RadzenCard>
+                </ChildContent>
+                <SummaryTemplate>
+                </SummaryTemplate>
+            </RadzenPanel>
+        </RadzenCard>
+    }
+}
 
 @code {
     private IScheduleTimeCardsCollectionPage? timecards;
@@ -108,6 +160,44 @@
         var actual_hours = weeks_since_start_week * average_weekly_hours_since(DateOnly.FromDateTime(start));
         return actual_hours - target_hours;
     }
+    private async Task update_start_and_end_time_for_timecard(string timecard_id, DateTimeOffset new_start, DateTimeOffset? new_end)
+    {
+        var timecard = all_timecards?.FirstOrDefault(x => x.Id == timecard_id);
+        DateTimeOffset? old_start = timecard?.ClockInEvent.DateTime;
+        DateTimeOffset? old_end = timecard?.ClockOutEvent?.DateTime;
+
+        if (timecard == null)
+        {
+            Console.WriteLine($"Timecard {timecard_id} not found");
+            return;
+        }
+
+        if (timecard.ClockInEvent.DateTime != new_start)
+        {
+            timecard.ClockInEvent.DateTime = new_start;
+            Console.WriteLine($"Updating timecard {timecard_id} to start from {timecard?.ClockInEvent.DateTime} to {new_start}");
+        }
+
+        if (timecard!.ClockOutEvent == null)
+        {
+            Console.WriteLine($"Timecard {timecard_id} is still clocked in, not updating end time");
+        }
+        else if (timecard.ClockOutEvent.DateTime != new_end)
+        {
+            timecard.ClockOutEvent.DateTime = new_end;
+            Console.WriteLine($"Updating timecard {timecard_id} to end from {timecard?.ClockOutEvent?.DateTime} to {new_end}");
+        }
+        var request = graphclient.Teams[clientsettings.theteamid].Schedule.TimeCards[timecard_id].Request();
+        var response =  await request.PutResponseAsync(timecard);
+        if (!response.StatusCode.IsSuccessStatusCode())
+        {
+            Console.WriteLine($"Error updating timecard {timecard_id}, rolling back changes.");
+            if (old_start != null)
+                timecard!.ClockInEvent.DateTime = old_start;
+            if (old_end != null)
+                timecard!.ClockOutEvent!.DateTime = old_end;
+        }
+    }
 
     void DateRenderSundays(DateRenderEventArgs args)
     {
@@ -116,6 +206,7 @@
 
     Timer? update_timecards;
     Timer? update_timecards_if_vis;
+    Timer? update_datetimes_in_gui;
     protected override async Task OnInitializedAsync()
     {
         if (clientsettings.theteamid == null)
@@ -131,6 +222,9 @@
 
         // This updates timecards when the page becomes visible
         await visibility.OnVisibilityChangeAsync(async _ => await FetchAllTimecards(), this);
+
+        // This updates the clock/timecard every second
+        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
     private bool _fetching_alltimecards = false;

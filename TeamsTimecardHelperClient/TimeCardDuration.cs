@@ -9,6 +9,13 @@ static class TimeCardDuration
         var tss = (TimeSpan)ts;
         return $"{(tss.Days * 24) + tss.Hours:00}:{tss.Minutes:00}:{tss.Seconds:00}";
     }
+    public static string FormatDurationShort(TimeSpan? ts)
+    {
+        if (ts == null)
+            return "--:--";
+        var tss = (TimeSpan)ts;
+        return $"{(tss.Days * 24) + tss.Hours:00}:{tss.Minutes:00}";
+    }
 
     public static TimeSpan? TotalTimespan(IEnumerable<TimeCard>? timeCards)
     {
@@ -29,13 +36,15 @@ static class TimeCardDuration
     public static TimeSpan HoursFromTimeCard(TimeCard tc)
     {
             DateTime dt_in = tc!.ClockInEvent?.DateTime?.DateTime ?? throw new Exception("TimeCard.ClockInEvent.DateTime should never not be null");
-            DateTime dt_out = tc?.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow; // Still clocked in
-            var hours = (dt_out - dt_in);
-
-            foreach (var b in tc?.Breaks ?? Enumerable.Empty<TimeCardBreak>())
-                hours  -=  HoursFromTimeCardBreak(b);
-
-            return hours;
+            DateTime dt_out = tc!.ClockOutEvent?.DateTime?.DateTime ?? DateTime.UtcNow; // Still clocked in
+            return dt_out - dt_in - BreakHoursFromTimeCard(tc);
+    }
+    public static TimeSpan BreakHoursFromTimeCard(TimeCard tc)
+    {
+        var total = new TimeSpan();
+        foreach (var b in tc?.Breaks ?? Enumerable.Empty<TimeCardBreak>())
+            total += HoursFromTimeCardBreak(b);
+        return total;
     }
 
     public static  TimeSpan HoursFromTimeCardBreak(TimeCardBreak tcb)
