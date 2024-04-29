@@ -8,6 +8,9 @@
 
 <div class="d-flex flex-column">
 <h2 class="text-center">Timecard Total</h2>
+
+<PageTitle> @FormatDuration(TotalTimespan(TimeCards))</PageTitle>
+
 <RadzenRadialGauge>
     @{
         int target = clientsettings.targetweeklyhours;
@@ -41,7 +44,10 @@
     [Parameter]
     public required IEnumerable<TimeCard>? TimeCards { get; set; }
 
+    Timer? update_datetimes_in_gui;
     protected override void OnInitialized()
     {
+        // This updates the clock/timecard every second
+        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 }

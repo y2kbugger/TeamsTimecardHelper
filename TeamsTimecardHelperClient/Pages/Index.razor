@@ -12,8 +12,6 @@
 @inject NavigationManager nav
 @inject PageVisibilityService visibility
 
-<PageTitle> @FormatDuration(TotalTimespan(current_timecards))</PageTitle>
-
 <div class="row justify-content-start m-1" style="position: fixed; top: 0; left: 0; z-index:100; width: 40em;">
     <ClockInOut TeamId=@clientsettings.theteamid OnChangeState=@FetchAllTimecards/>
     <RadzenDatePicker DateRender=@DateRenderSundays
@@ -222,7 +220,6 @@
 
     Timer? update_timecards;
     Timer? update_timecards_if_vis;
-    Timer? update_datetimes_in_gui;
     protected override async Task OnInitializedAsync()
     {
         if (clientsettings.theteamid == null)
@@ -238,9 +235,6 @@
 
         // This updates timecards when the page becomes visible
         await visibility.OnVisibilityChangeAsync(async _ => await FetchAllTimecards(), this);
-
-        // This updates the clock/timecard every second
-        update_datetimes_in_gui = new Timer(_ => StateHasChanged(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
     private bool _fetching_alltimecards = false;
