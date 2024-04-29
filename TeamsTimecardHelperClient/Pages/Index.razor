@@ -6,6 +6,7 @@
 @using CurrieTechnologies.Razor.PageVisibility
 @using static TimeCardDuration
 
+@inject IJSRuntime js
 @inject GraphServiceClient graphclient
 @inject ClientSettings clientsettings
 @inject NavigationManager nav
@@ -80,6 +81,12 @@
                             </div>
                         </div>
                         }
+                        <div class="mb-3 row">
+                            <label for="deletetimecard" class="col-sm-2 col-form-label pt-0 text-end"><b>Delete Timecard</b></label>
+                            <div class="col-sm-10">
+                                <button type="button" class="btn btn-danger" @onclick=@(async () => await delete_timecard(timecard.Id))>Delete</button>
+                            </div>
+                        </div>
                     </form>
                     <pre class="card m-2 p-2">
                         @(timecard.Notes?.Content ?? "No notes.")
@@ -158,6 +165,16 @@
         var target_hours = weeks_since_start_week * target_weekly_hours;
         var actual_hours = weeks_since_start_week * average_weekly_hours_since(DateOnly.FromDateTime(start));
         return actual_hours - target_hours;
+    }
+    private async Task delete_timecard(string timecard_id)
+    {
+        bool confirmed = await js.InvokeAsync<bool>("confirm", "Are you sure?");
+        if (confirmed)
+        {
+            await graphclient.Teams[clientsettings.theteamid].Schedule.TimeCards[timecard_id].Request().DeleteAsync();
+            // update loaded timecards
+            all_timecards = all_timecards?.Where(x => x.Id != timecard_id).ToList();
+        }
     }
     private async Task update_start_and_end_time_for_timecard(string timecard_id, DateTimeOffset new_start, DateTimeOffset? new_end)
     {
