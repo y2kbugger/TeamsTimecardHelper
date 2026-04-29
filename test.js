@@ -1,14 +1,18 @@
-'use strict';
-
-const auth = window.timecardsAuth;
-const app = window.timecardsApp;
+import * as auth from './auth.js';
+import {
+    fetchJoinedTeams,
+    fetchWeekTimeCards,
+    buildTimeCardsPageUrl,
+    buildProjectedTimelineUpdate,
+    getTeamCache,
+    getResolvedWeekStart,
+    getWeekRange,
+    formatDateInputValue,
+} from './app.js';
+import { $ } from './ui.js';
 
 const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function $(id) {
-    return document.getElementById(id);
-}
 
 function parseParams() {
     const params = new URLSearchParams(window.location.search);
@@ -159,7 +163,7 @@ async function probeLastModifiedOrderBy(teamId) {
 }
 
 async function probeCombinedWeekQuery(teamId, weekStartInput) {
-    const { weekStart, weekEndInclusive } = app.getWeekRange(weekStartInput);
+    const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
     const filterExpr = `((clockInEvent/dateTime le ${weekEndInclusive.toISOString()} and clockOutEvent/dateTime ge ${weekStart.toISOString()}) or state eq 'clockedIn' or state eq 'onBreak')`;
     const r = await probeFilterExpression(teamId, filterExpr);
     return r.supported;
@@ -198,7 +202,7 @@ function assertDocumentedFilterSupport(matrix) {
 
 async function requireTeam(context) {
     if (context.team) return context.team;
-    const teams = await app.fetchJoinedTeams();
+    const teams = await fetchJoinedTeams();
     context.teams = teams;
     const savedId = context.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
     context.team = teams.find(t => t.id === savedId) || teams[0] || null;
@@ -223,21 +227,12 @@ const tests = [
         }),
     },
     {
-        name: 'app-api',
-        requiresAuth: false,
-        run: async () => ({
-            hasAuthApi: Boolean(auth),
-            hasAppApi: Boolean(app),
-            appMethods: Object.keys(app || {}),
-        }),
-    },
-    {
         name: 'timeline-open-card-update',
         requiresAuth: false,
         run: async () => {
             const clockIn = new Date('2026-04-29T16:00:00.000Z');
             const attemptedClockOut = new Date('2026-04-29T18:15:00.000Z');
-            const projection = app.buildProjectedTimelineUpdate({
+            const projection = buildProjectedTimelineUpdate({
                 id: 'self-test-open-card',
                 state: 'clockedIn',
                 userId: 'self-test-user',
@@ -265,9 +260,9 @@ const tests = [
             if (!teamId) {
                 return { selectedTeamId: '', reason: 'No saved team is currently selected.' };
             }
-            const cache = app.getTeamCache(teamId);
-            const selectedWeek = app.getResolvedWeekStart();
-            const selectedWeekKey = app.formatDateInputValue(selectedWeek);
+            const cache = getTeamCache(teamId);
+            const selectedWeek = getResolvedWeekStart();
+            const selectedWeekKey = formatDateInputValue(selectedWeek);
             const hasCurrentWeek = cache.currentWeekKey === selectedWeekKey;
             const now = Date.now();
             return {
@@ -313,7 +308,7 @@ const tests = [
         name: 'joined-teams',
         requiresAuth: true,
         run: async ctx => {
-            const teams = await app.fetchJoinedTeams();
+            const teams = await fetchJoinedTeams();
             ctx.teams = teams;
             return {
                 count: teams.length,
@@ -325,7 +320,7 @@ const tests = [
         name: 'resolve-team',
         requiresAuth: true,
         run: async ctx => {
-            const teams = await app.fetchJoinedTeams();
+            const teams = await fetchJoinedTeams();
             ctx.teams = teams;
             const savedId = ctx.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
             ctx.team = teams.find(t => t.id === savedId) || teams[0] || null;
@@ -341,7 +336,7 @@ const tests = [
         requiresAuth: true,
         run: async ctx => {
             const team = await requireTeam(ctx);
-            const result = await auth.graphFetch(app.buildTimeCardsPageUrl(team.id, { pageSize: 1 }));
+            const result = await auth.graphFetch(buildTimeCardsPageUrl(team.id, { pageSize: 1 }));
             return {
                 teamId: team.id,
                 count: Array.isArray(result?.value) ? result.value.length : 0,
@@ -355,11 +350,11 @@ const tests = [
         run: async ctx => {
             const team = await requireTeam(ctx);
             const startedAt = performance.now();
-            const snapshot = await app.fetchWeekTimeCards(team.id, ctx.params.week);
+            const snapshot = await fetchWeekTimeCards(team.id, ctx.params.week);
             const durationMs = Math.round(performance.now() - startedAt);
             return {
                 teamId: team.id,
-                weekStart: app.formatDateInputValue(snapshot.weekStart),
+                weekStart: formatDateInputValue(snapshot.weekStart),
                 cardsCount: snapshot.cards.length,
                 pageCount: snapshot.pageCount,
                 durationMs,
@@ -373,11 +368,11 @@ const tests = [
         requiresAuth: true,
         run: async ctx => {
             const team = await requireTeam(ctx);
-            const snapshot = await app.fetchWeekTimeCards(team.id, ctx.params.week);
-            const cache = app.getTeamCache(team.id);
+            const snapshot = await fetchWeekTimeCards(team.id, ctx.params.week);
+            const cache = getTeamCache(team.id);
             return {
                 teamId: team.id,
-                selectedWeek: app.formatDateInputValue(snapshot.weekStart),
+                selectedWeek: formatDateInputValue(snapshot.weekStart),
                 serverCardsCount: snapshot.cards.length,
                 cachedWeekKey: cache.currentWeekKey || null,
                 cachedCardsCount: cache.currentWeekCards.length,

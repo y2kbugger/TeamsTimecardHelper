@@ -3,6 +3,7 @@
 ## User Preferences
 
 - Keep this as a static app. Do not introduce a build step or install Node packages.
+- Code is split into native ES modules (no bundler). Browsers load them directly via `<script type="module">`. They will not load over `file://` — always use `serve.sh` (http://localhost:8999).
 - Node is acceptable for syntax checks only, such as `node --check`.
 - Prefer simpler DOM over decorative structure. Resize handles should stay square, thin, and minimal.
 - Keep structure split and simple:
@@ -21,15 +22,16 @@
 
 ## Project Structure
 
-- `config.js`: hardcoded auth/runtime config
-- `login.html`: sign-in page
-- `index.html`: main app shell
-- `auth.js`: MSAL bootstrap, session restore, sign-in, sign-out, Graph fetch helpers
-- `app.js`: team/timecard loading, rendering, interactions (production only — no probes)
+- `config.js`: hardcoded auth/runtime config (ES module, exports `config`)
+- `ui.js`: shared DOM helpers (`$`, `escHtml`, `toast`, `showError`)
+- `login.html`: sign-in page (loads `auth.js` directly)
+- `index.html`: main app shell (loads `app.js`, which imports `auth.js` and `ui.js`)
+- `auth.js`: MSAL bootstrap, session restore, sign-in/out, Graph fetch helpers. Auto-boots only on the login page; the app and test pages drive their own boot via explicit imports.
+- `app.js`: team/timecard loading, rendering, interactions (production only — no probes). Exports the small surface area used by `test.js`.
 - `common.css`: shared layout, buttons, modals, banners, sign-in, test-page scaffolding
 - `timecards.css`: timeline, cards, team picker, app-specific UI
-- `test.html`: browser self-test runner
-- `test.js`: self-test framework, contract probes, and assertions. Calls real production functions via `window.timecardsApp` for shared behavior; performs Graph contract probes directly via `auth.graphFetch` (probes do not exist in `app.js`).
+- `test.html`: browser self-test runner (loads `test.js`)
+- `test.js`: self-test framework, contract probes, and assertions. Imports real production functions from `app.js`; performs Graph contract probes directly via `auth.graphFetch`.
 
 ## Working Approach
 
@@ -53,3 +55,7 @@
 - Microsoft Graph action endpoints can also succeed with `204 No Content`; use a follow-up `GET /timeCards/{id}` for clock-out/start-break/end-break and a current-week fetch to discover the new active card after clock-in.
 - The edit modal uses minute-precision `datetime-local` inputs, so unchanged values must reuse the original ISO timestamp to avoid silently rounding away seconds.
 - Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.
+
+## TODO
+- make clockin/out and break start/end a better state machine, combinine the curring chip indicator into the buttons themselves with better colors. don't allow clocking out if on break, etc. use the button to convery the current state instead of a separate chip. use this to simpolify dom and css needs and make state clearer to user.
+- Expunge being able to drag entire cards left and right. i never want to move start and end times together and i just end up doing it by accident. we only need to be able to move a left or right edge of cards and breaks.
