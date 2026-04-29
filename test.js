@@ -1,7 +1,10 @@
 'use strict';
 
 const auth = window.timecardsAuth;
-const appApi = window.timecardsApp;
+const app = window.timecardsApp;
+
+const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function $(id) {
     return document.getElementById(id);
@@ -13,21 +16,15 @@ function parseParams() {
         test: (params.get('test') || 'all').trim(),
         teamId: (params.get('teamId') || '').trim(),
         week: (params.get('week') || '').trim(),
-        force: params.get('force') !== '0',
     };
 }
 
 function formatJson(value) {
-    if (typeof value === 'string') {
-        return value;
-    }
-    return JSON.stringify(value, null, 2);
+    return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
 function formatAccount(account) {
-    if (!account) {
-        return 'not signed in';
-    }
+    if (!account) return 'not signed in';
     return `${account.name || account.username || 'signed in'} (${account.username || account.homeAccountId || 'no identifier'})`;
 }
 
@@ -35,10 +32,7 @@ function setAuthStatus(session) {
     const authStatus = $('test-auth-status');
     const signInButton = $('btn-test-signin');
     const signOutButton = $('btn-test-signout');
-    if (!authStatus || !signInButton || !signOutButton) {
-        return;
-    }
-
+    if (!authStatus || !signInButton || !signOutButton) return;
     authStatus.textContent = session.authenticated
         ? `Authenticated: ${formatAccount(session.account)}`
         : 'Authenticated: no';
@@ -50,21 +44,15 @@ function renderMeta(params) {
     const meta = $('test-meta');
     if (!meta) return;
     const queryBits = [`test=${params.test}`];
-    if (params.teamId) {
-        queryBits.push(`teamId=${params.teamId}`);
-    }
-    if (params.week) {
-        queryBits.push(`week=${params.week}`);
-    }
-    queryBits.push(`force=${params.force ? '1' : '0'}`);
-    meta.textContent = `Run one test with ?test=<name>. Available: auth-status, app-api, timeline-open-card-update, cache-snapshot, confirm-supported-timecard-filters, confirm-no-combined-week-query, joined-teams, resolve-team, timecards-top-1, selected-week-fetch-timing, server-vs-cache, confirm-no-lastmodified-filter, confirm-no-lastmodified-orderby. Current query: ${queryBits.join('&')}`;
+    if (params.teamId) queryBits.push(`teamId=${params.teamId}`);
+    if (params.week) queryBits.push(`week=${params.week}`);
+    const names = tests.map(t => t.name).join(', ');
+    meta.textContent = `Run one test with ?test=<name>. Available: ${names}. Current query: ${queryBits.join('&')}`;
 }
 
 function renderSummary(message) {
     const summary = $('test-summary');
-    if (summary) {
-        summary.textContent = message;
-    }
+    if (summary) summary.textContent = message;
 }
 
 function createResultRow(name) {
@@ -82,64 +70,155 @@ function createResultRow(name) {
 function updateResultRow(row, status, details) {
     row.className = `test-result test-result-${status}`;
     const body = row.querySelector('.test-result-body');
-    if (body) {
-        body.textContent = formatJson(details);
+    if (body) body.textContent = formatJson(details);
+}
+
+// ─────────────────────────────────────────────
+// Probes (Microsoft Graph contract verification)
+// These are verification-only; production code never runs them.
+// ─────────────────────────────────────────────
+function buildTimeCardFilterUrl(teamId, filterExpr, pageSize = 1) {
+    return `/teams/${teamId}/schedule/timeCards?$top=${pageSize}&$filter=${encodeURIComponent(filterExpr)}`;
+}
+
+function isRejectedFilterError(message) {
+    return /filter|unsupported|not allowed|could not find a property|invalid|orderby|order by|sort/i.test(message || '');
+}
+
+function escapeODataLiteral(value) {
+    return String(value || '').replace(/'/g, "''");
+}
+
+async function probeFilterExpression(teamId, expression) {
+    try {
+        await auth.graphFetch(buildTimeCardFilterUrl(teamId, expression));
+        return { supported: true, message: 'Graph accepted the filter.' };
+    } catch (error) {
+        const message = error?.message || 'Unknown Graph error';
+        if (isRejectedFilterError(message)) return { supported: false, message };
+        return { supported: null, message };
     }
 }
 
-async function requireTeam(context) {
-    if (context.team) {
-        return context.team;
+async function probeFilterAlternatives(teamId, label, expressions) {
+    let lastMessage = '';
+    for (const expression of expressions) {
+        const r = await probeFilterExpression(teamId, expression);
+        if (r.supported === true) {
+            return { label, supported: true, acceptedExpression: expression, triedExpressions: expressions, message: r.message };
+        }
+        if (r.supported === null) {
+            return { label, supported: null, acceptedExpression: null, triedExpressions: expressions, message: r.message };
+        }
+        lastMessage = r.message;
     }
-    const resolved = await appApi.resolveTeamForSelfTest(context.params.teamId);
-    context.team = resolved.team;
-    context.teams = resolved.teams;
-    if (!context.team) {
-        throw new Error('No joined teams were available for the current account');
-    }
-    return context.team;
+    return { label, supported: false, acceptedExpression: null, triedExpressions: expressions, message: lastMessage || 'Rejected.' };
 }
 
-function assertDocumentedFilterSupport(support) {
-    const expected = {
-        clockInGe: 'clockInEvent/dateTime ge',
-        clockInLe: 'clockInEvent/dateTime le',
-        clockOutGe: 'clockOutEvent/dateTime ge',
-        clockOutLe: 'clockOutEvent/dateTime le',
-        stateEq: 'state eq',
-        userIdEq: 'userId eq',
+async function probeDocumentedFilterMatrix(teamId) {
+    const account = auth.getCurrentAccount();
+    const userId = account?.localAccountId || account?.homeAccountId || '00000000-0000-0000-0000-000000000000';
+    const now = Date.now();
+    const lowerBoundIso = new Date(now - 30 * DAY_MS).toISOString();
+    const upperBoundIso = new Date(now + DAY_MS).toISOString();
+
+    const definitions = [
+        { key: 'clockInGe', label: 'clockInEvent/dateTime ge', expressions: [`clockInEvent/dateTime ge ${lowerBoundIso}`, `clockInEvent/datetime ge ${lowerBoundIso}`] },
+        { key: 'clockInLe', label: 'clockInEvent/dateTime le', expressions: [`clockInEvent/dateTime le ${upperBoundIso}`, `clockInEvent/datetime le ${upperBoundIso}`] },
+        { key: 'clockOutGe', label: 'clockOutEvent/dateTime ge', expressions: [`clockOutEvent/dateTime ge ${lowerBoundIso}`, `clockOutEvent/datetime ge ${lowerBoundIso}`] },
+        { key: 'clockOutLe', label: 'clockOutEvent/dateTime le', expressions: [`clockOutEvent/dateTime le ${upperBoundIso}`, `clockOutEvent/datetime le ${upperBoundIso}`] },
+        { key: 'stateEq', label: 'state eq', expressions: ["state eq 'clockedIn'"] },
+        { key: 'userIdEq', label: 'userId eq', expressions: [`userId eq '${escapeODataLiteral(userId)}'`] },
+    ];
+
+    const entries = await Promise.all(definitions.map(async d => ({
+        key: d.key,
+        result: await probeFilterAlternatives(teamId, d.label, d.expressions),
+    })));
+
+    const matrix = { checkedAt: new Date().toISOString() };
+    entries.forEach(e => { matrix[e.key] = e.result; });
+    return matrix;
+}
+
+async function probeLastModifiedFilter(teamId) {
+    const r = await probeFilterExpression(teamId, 'lastModifiedDateTime ge 1970-01-01T00:00:00Z');
+    return r.supported;
+}
+
+async function probeLastModifiedOrderBy(teamId) {
+    const url = `/teams/${teamId}/schedule/timeCards?$top=1&$orderby=${encodeURIComponent('lastModifiedDateTime desc')}`;
+    try {
+        await auth.graphFetch(url);
+        return true;
+    } catch (error) {
+        const message = error?.message || '';
+        if (/lastmodifieddatetime|orderby|order by|sort|not allowed|unsupported/i.test(message)) return false;
+        return null;
+    }
+}
+
+async function probeCombinedWeekQuery(teamId, weekStartInput) {
+    const { weekStart, weekEndInclusive } = app.getWeekRange(weekStartInput);
+    const filterExpr = `((clockInEvent/dateTime le ${weekEndInclusive.toISOString()} and clockOutEvent/dateTime ge ${weekStart.toISOString()}) or state eq 'clockedIn' or state eq 'onBreak')`;
+    const r = await probeFilterExpression(teamId, filterExpr);
+    return r.supported;
+}
+
+// ─────────────────────────────────────────────
+// Test helpers
+// ─────────────────────────────────────────────
+function summarizeCard(card) {
+    if (!card) return null;
+    const breaks = card.breaks || [];
+    return {
+        id: card.id || null,
+        state: card.state || null,
+        clockIn: card.clockIn?.dateTime || null,
+        clockOut: card.clockOut?.dateTime || null,
+        breakCount: breaks.length,
+        openBreakCount: breaks.filter(b => b.start && !b.end).length,
+        lastModifiedDateTime: card.lastModifiedDateTime || null,
     };
+}
 
-    const unsupported = Object.entries(expected)
-        .filter(([key]) => support?.[key]?.supported !== true)
-        .map(([, label]) => label);
+function assertProbeRejected(supported, label) {
+    if (supported !== false) throw new Error(`Expected ${label} to be rejected, got ${supported}`);
+    return supported;
+}
 
+function assertDocumentedFilterSupport(matrix) {
+    const required = ['clockInGe', 'clockInLe', 'clockOutGe', 'clockOutLe', 'stateEq', 'userIdEq'];
+    const unsupported = required.filter(key => matrix?.[key]?.supported !== true).map(key => matrix?.[key]?.label || key);
     if (unsupported.length) {
         throw new Error(`Expected documented timecard filters to be supported: ${unsupported.join(', ')}`);
     }
-
-    return support;
+    return matrix;
 }
 
-function assertProbeRejected(result, label) {
-    if (result !== false) {
-        throw new Error(`Expected ${label} to be rejected, got ${String(result)}`);
-    }
-    return result;
+async function requireTeam(context) {
+    if (context.team) return context.team;
+    const teams = await app.fetchJoinedTeams();
+    context.teams = teams;
+    const savedId = context.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
+    context.team = teams.find(t => t.id === savedId) || teams[0] || null;
+    if (!context.team) throw new Error('No joined teams were available for the current account');
+    return context.team;
 }
 
+// ─────────────────────────────────────────────
+// Test definitions
+// ─────────────────────────────────────────────
 const tests = [
     {
         name: 'auth-status',
         requiresAuth: false,
-        run: async context => ({
-            authenticated: context.session.authenticated,
-            account: context.session.account
-                ? {
-                    name: context.session.account.name || '',
-                    username: context.session.account.username || '',
-                }
-                : null,
+        run: async ctx => ({
+            authenticated: ctx.session.authenticated,
+            account: ctx.session.account ? {
+                name: ctx.session.account.name || '',
+                username: ctx.session.account.username || '',
+            } : null,
             redirectUri: auth.getRuntimeConfig().redirectUri,
         }),
     },
@@ -148,8 +227,8 @@ const tests = [
         requiresAuth: false,
         run: async () => ({
             hasAuthApi: Boolean(auth),
-            hasAppApi: Boolean(appApi),
-            appMethods: Object.keys(appApi || {}),
+            hasAppApi: Boolean(app),
+            appMethods: Object.keys(app || {}),
         }),
     },
     {
@@ -158,16 +237,13 @@ const tests = [
         run: async () => {
             const clockIn = new Date('2026-04-29T16:00:00.000Z');
             const attemptedClockOut = new Date('2026-04-29T18:15:00.000Z');
-            const projection = appApi.buildProjectedTimelineUpdate({
+            const projection = app.buildProjectedTimelineUpdate({
                 id: 'self-test-open-card',
                 state: 'clockedIn',
                 userId: 'self-test-user',
                 createdDateTime: clockIn.toISOString(),
                 lastModifiedDateTime: clockIn.toISOString(),
-                clockIn: {
-                    dateTime: clockIn.toISOString(),
-                    atApprovedLocation: false,
-                },
+                clockIn: { dateTime: clockIn.toISOString(), atApprovedLocation: false },
                 clockOut: null,
                 breaks: [],
                 notes: null,
@@ -184,42 +260,61 @@ const tests = [
     {
         name: 'cache-snapshot',
         requiresAuth: false,
-        run: async context => appApi.getPersistedTimeCardCacheSnapshotForSelfTest(context.params.teamId),
+        run: async ctx => {
+            const teamId = ctx.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
+            if (!teamId) {
+                return { selectedTeamId: '', reason: 'No saved team is currently selected.' };
+            }
+            const cache = app.getTeamCache(teamId);
+            const selectedWeek = app.getResolvedWeekStart();
+            const selectedWeekKey = app.formatDateInputValue(selectedWeek);
+            const hasCurrentWeek = cache.currentWeekKey === selectedWeekKey;
+            const now = Date.now();
+            return {
+                selectedTeamId: teamId,
+                selectedWeek: selectedWeekKey,
+                cachedWeekKey: cache.currentWeekKey || null,
+                currentWeek: hasCurrentWeek ? {
+                    cardsCount: cache.currentWeekCards.length,
+                    fetchedAt: cache.currentWeekFetchedAt || 0,
+                    ageMs: cache.currentWeekFetchedAt ? (now - cache.currentWeekFetchedAt) : null,
+                } : null,
+                hasPendingRequest: Boolean(cache.pendingWeekPromise),
+                activeCard: summarizeCard(cache.activeCard),
+            };
+        },
     },
     {
         name: 'confirm-supported-timecard-filters',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
+        run: async ctx => {
+            const team = await requireTeam(ctx);
             return {
                 teamId: team.id,
-                support: assertDocumentedFilterSupport(
-                    await appApi.probeTimeCardDocumentedFilterSupport(team.id, context.params.force),
-                ),
+                support: assertDocumentedFilterSupport(await probeDocumentedFilterMatrix(team.id)),
             };
         },
     },
     {
         name: 'confirm-no-combined-week-query',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
-            const result = assertProbeRejected(
-                await appApi.probeTimeCardCombinedWeekQuerySupport(team.id, context.params.week, context.params.force),
-                'combined weekly timecard query support',
-            );
+        run: async ctx => {
+            const team = await requireTeam(ctx);
             return {
                 teamId: team.id,
-                supported: result,
+                supported: assertProbeRejected(
+                    await probeCombinedWeekQuery(team.id, ctx.params.week),
+                    'combined weekly timecard query support',
+                ),
             };
         },
     },
     {
         name: 'joined-teams',
         requiresAuth: true,
-        run: async context => {
-            const teams = await appApi.fetchJoinedTeamsForSelfTest();
-            context.teams = teams;
+        run: async ctx => {
+            const teams = await app.fetchJoinedTeams();
+            ctx.teams = teams;
             return {
                 count: teams.length,
                 firstTeam: teams[0] ? { id: teams[0].id, displayName: teams[0].displayName } : null,
@@ -229,23 +324,24 @@ const tests = [
     {
         name: 'resolve-team',
         requiresAuth: true,
-        run: async context => {
-            const resolved = await appApi.resolveTeamForSelfTest(context.params.teamId);
-            context.team = resolved.team;
-            context.teams = resolved.teams;
+        run: async ctx => {
+            const teams = await app.fetchJoinedTeams();
+            ctx.teams = teams;
+            const savedId = ctx.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
+            ctx.team = teams.find(t => t.id === savedId) || teams[0] || null;
             return {
-                requestedTeamId: context.params.teamId || null,
-                resolvedTeam: resolved.team ? { id: resolved.team.id, displayName: resolved.team.displayName } : null,
-                availableTeams: resolved.teams.length,
+                requestedTeamId: ctx.params.teamId || null,
+                resolvedTeam: ctx.team ? { id: ctx.team.id, displayName: ctx.team.displayName } : null,
+                availableTeams: teams.length,
             };
         },
     },
     {
         name: 'timecards-top-1',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
-            const result = await appApi.fetchTimeCardsPageForSelfTest(team.id, { pageSize: 1 });
+        run: async ctx => {
+            const team = await requireTeam(ctx);
+            const result = await auth.graphFetch(app.buildTimeCardsPageUrl(team.id, { pageSize: 1 }));
             return {
                 teamId: team.id,
                 count: Array.isArray(result?.value) ? result.value.length : 0,
@@ -256,65 +352,70 @@ const tests = [
     {
         name: 'selected-week-fetch-timing',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
+        run: async ctx => {
+            const team = await requireTeam(ctx);
+            const startedAt = performance.now();
+            const snapshot = await app.fetchWeekTimeCards(team.id, ctx.params.week);
+            const durationMs = Math.round(performance.now() - startedAt);
             return {
                 teamId: team.id,
-                timing: await appApi.fetchWeekTimeCardsForSelfTest(team.id, context.params.week, { includeTiming: true }),
+                weekStart: app.formatDateInputValue(snapshot.weekStart),
+                cardsCount: snapshot.cards.length,
+                pageCount: snapshot.pageCount,
+                durationMs,
+                activeCard: summarizeCard(snapshot.activeCard),
+                sample: snapshot.cards.slice(0, 10).map(summarizeCard),
             };
         },
     },
     {
         name: 'server-vs-cache',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
-            const serverWeek = await appApi.fetchWeekTimeCardsForSelfTest(team.id, context.params.week, { includeTiming: false });
-
+        run: async ctx => {
+            const team = await requireTeam(ctx);
+            const snapshot = await app.fetchWeekTimeCards(team.id, ctx.params.week);
+            const cache = app.getTeamCache(team.id);
             return {
                 teamId: team.id,
-                selectedWeek: serverWeek.weekStart,
-                cache: appApi.getPersistedTimeCardCacheSnapshotForSelfTest(team.id),
-                serverWeek,
+                selectedWeek: app.formatDateInputValue(snapshot.weekStart),
+                serverCardsCount: snapshot.cards.length,
+                cachedWeekKey: cache.currentWeekKey || null,
+                cachedCardsCount: cache.currentWeekCards.length,
             };
         },
     },
     {
         name: 'confirm-no-lastmodified-filter',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
-            const result = assertProbeRejected(
-                await appApi.probeTimeCardLastModifiedFilterSupport(team.id, context.params.force),
-                'lastModifiedDateTime filter support',
-            );
+        run: async ctx => {
+            const team = await requireTeam(ctx);
             return {
                 teamId: team.id,
-                supported: result,
+                supported: assertProbeRejected(
+                    await probeLastModifiedFilter(team.id),
+                    'lastModifiedDateTime filter support',
+                ),
             };
         },
     },
     {
         name: 'confirm-no-lastmodified-orderby',
         requiresAuth: true,
-        run: async context => {
-            const team = await requireTeam(context);
-            const result = assertProbeRejected(
-                await appApi.probeTimeCardLastModifiedOrderBySupport(team.id, context.params.force),
-                'lastModifiedDateTime orderby support',
-            );
+        run: async ctx => {
+            const team = await requireTeam(ctx);
             return {
                 teamId: team.id,
-                supported: result,
+                supported: assertProbeRejected(
+                    await probeLastModifiedOrderBy(team.id),
+                    'lastModifiedDateTime orderby support',
+                ),
             };
         },
     },
 ];
 
 function getRequestedTests(params) {
-    if (!params.test || params.test === 'all') {
-        return tests;
-    }
+    if (!params.test || params.test === 'all') return tests;
     const found = tests.find(test => test.name === params.test);
     return found ? [found] : [];
 }
@@ -345,13 +446,7 @@ async function runSuite() {
         return;
     }
 
-    const context = {
-        params,
-        session,
-        team: null,
-        teams: null,
-    };
-
+    const context = { params, session, team: null, teams: null };
     let passed = 0;
     let failed = 0;
     let skipped = 0;
@@ -386,24 +481,16 @@ function bindActions() {
     if (signInButton) {
         signInButton.addEventListener('click', async () => {
             signInButton.disabled = true;
-            try {
-                await auth.signIn({ navigateToApp: false });
-            } finally {
-                signInButton.disabled = false;
-                await runSuite();
-            }
+            try { await auth.signIn({ navigateToApp: false }); }
+            finally { signInButton.disabled = false; await runSuite(); }
         });
     }
 
     if (signOutButton) {
         signOutButton.addEventListener('click', async () => {
             signOutButton.disabled = true;
-            try {
-                await auth.signOut({ navigateToLogin: false });
-            } finally {
-                signOutButton.disabled = false;
-                await runSuite();
-            }
+            try { await auth.signOut({ navigateToLogin: false }); }
+            finally { signOutButton.disabled = false; await runSuite(); }
         });
     }
 }

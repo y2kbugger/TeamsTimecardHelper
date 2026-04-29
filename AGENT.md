@@ -25,17 +25,17 @@
 - `login.html`: sign-in page
 - `index.html`: main app shell
 - `auth.js`: MSAL bootstrap, session restore, sign-in, sign-out, Graph fetch helpers
-- `app.js`: team/timecard loading, rendering, interactions, probe logic
+- `app.js`: team/timecard loading, rendering, interactions (production only — no probes)
 - `common.css`: shared layout, buttons, modals, banners, sign-in, test-page scaffolding
 - `timecards.css`: timeline, cards, team picker, app-specific UI
 - `test.html`: browser self-test runner
-- `test.js`: self-test framework and probe runner
+- `test.js`: self-test framework, contract probes, and assertions. Calls real production functions via `window.timecardsApp` for shared behavior; performs Graph contract probes directly via `auth.graphFetch` (probes do not exist in `app.js`).
 
 ## Working Approach
 
 - Start from the narrowest deciding code path.
 - Prefer small, local edits and validate immediately after each substantive change.
-- Reuse the existing Graph probe logic instead of duplicating behavior in separate tools.
+- Self-tests and Graph contract probes live in `test.js`. `app.js` contains no probe or test-only code; `test.js` shares code by calling real production functions on `window.timecardsApp`.
 - Keep test pages browser-runnable without any build or package install.
 - Prefer visible test output over console-only debugging, since integrated browser auth state matters.
 
