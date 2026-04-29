@@ -348,6 +348,22 @@
   cursor: grabbing;
 }
 
+.tc-block[data-end-ms=""] {
+  cursor: default;
+}
+
+.tc-block[data-end-ms=""]:active {
+  cursor: default;
+}
+
+.tc-block[data-end-ms=""] .resize-handle[data-edge="left"] {
+  cursor: ew-resize;
+}
+
+.tc-block[data-end-ms=""] .resize-handle[data-edge="right"] {
+  display: none;
+}
+
 .tc-block.link-highlighted {
   box-shadow: 0 0 0 2px rgba(175, 244, 198, .95), 0 0 0 4px rgba(76, 186, 114, .38);
   filter: saturate(1.15) brightness(1.03);

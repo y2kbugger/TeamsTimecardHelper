@@ -44,3 +44,12 @@
 - Use `node --check` for JavaScript syntax validation.
 - Use the browser self-test page for auth status, Graph reachability, and feature probes.
 - Avoid adding dependencies just for validation.
+
+## Verified Graph Notes
+
+- Microsoft Graph timeCards filter compounds accept `and`, but this tenant rejects `or` in combined expressions such as overlap-or-open-state weekly queries.
+- The accepted production week fetch is a single `clockInEvent/dateTime ge ... and clockInEvent/dateTime le ...` query; keep the rejected combined overlap/state probe as a negative assertion.
+- Microsoft Graph `PUT /teams/{teamId}/schedule/timeCards/{timeCardId}` succeeds with `204 No Content`; client update flows must not require a returned card body.
+- Microsoft Graph action endpoints can also succeed with `204 No Content`; use a follow-up `GET /timeCards/{id}` for clock-out/start-break/end-break and a current-week fetch to discover the new active card after clock-in.
+- The edit modal uses minute-precision `datetime-local` inputs, so unchanged values must reuse the original ISO timestamp to avoid silently rounding away seconds.
+- Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.

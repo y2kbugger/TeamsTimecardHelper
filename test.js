@@ -12,6 +12,7 @@ function parseParams() {
     return {
         test: (params.get('test') || 'all').trim(),
         teamId: (params.get('teamId') || '').trim(),
+        week: (params.get('week') || '').trim(),
         force: params.get('force') !== '0',
     };
 }
@@ -52,8 +53,11 @@ function renderMeta(params) {
     if (params.teamId) {
         queryBits.push(`teamId=${params.teamId}`);
     }
+    if (params.week) {
+        queryBits.push(`week=${params.week}`);
+    }
     queryBits.push(`force=${params.force ? '1' : '0'}`);
-    meta.textContent = `Run one test with ?test=<name>. Available: auth-status, app-api, joined-teams, resolve-team, timecards-top-1, lastmodified-filter-probe, lastmodified-orderby-probe. Current query: ${queryBits.join('&')}`;
+    meta.textContent = `Run one test with ?test=<name>. Available: auth-status, app-api, timeline-open-card-update, cache-snapshot, confirm-supported-timecard-filters, confirm-no-combined-week-query, joined-teams, resolve-team, timecards-top-1, selected-week-fetch-timing, server-vs-cache, confirm-no-lastmodified-filter, confirm-no-lastmodified-orderby. Current query: ${queryBits.join('&')}`;
 }
 
 function renderSummary(message) {
@@ -96,6 +100,34 @@ async function requireTeam(context) {
     return context.team;
 }
 
+function assertDocumentedFilterSupport(support) {
+    const expected = {
+        clockInGe: 'clockInEvent/dateTime ge',
+        clockInLe: 'clockInEvent/dateTime le',
+        clockOutGe: 'clockOutEvent/dateTime ge',
+        clockOutLe: 'clockOutEvent/dateTime le',
+        stateEq: 'state eq',
+        userIdEq: 'userId eq',
+    };
+
+    const unsupported = Object.entries(expected)
+        .filter(([key]) => support?.[key]?.supported !== true)
+        .map(([, label]) => label);
+
+    if (unsupported.length) {
+        throw new Error(`Expected documented timecard filters to be supported: ${unsupported.join(', ')}`);
+    }
+
+    return support;
+}
+
+function assertProbeRejected(result, label) {
+    if (result !== false) {
+        throw new Error(`Expected ${label} to be rejected, got ${String(result)}`);
+    }
+    return result;
+}
+
 const tests = [
     {
         name: 'auth-status',
@@ -119,6 +151,68 @@ const tests = [
             hasAppApi: Boolean(appApi),
             appMethods: Object.keys(appApi || {}),
         }),
+    },
+    {
+        name: 'timeline-open-card-update',
+        requiresAuth: false,
+        run: async () => {
+            const clockIn = new Date('2026-04-29T16:00:00.000Z');
+            const attemptedClockOut = new Date('2026-04-29T18:15:00.000Z');
+            const projection = appApi.buildProjectedTimelineUpdate({
+                id: 'self-test-open-card',
+                state: 'clockedIn',
+                userId: 'self-test-user',
+                createdDateTime: clockIn.toISOString(),
+                lastModifiedDateTime: clockIn.toISOString(),
+                clockIn: {
+                    dateTime: clockIn.toISOString(),
+                    atApprovedLocation: false,
+                },
+                clockOut: null,
+                breaks: [],
+                notes: null,
+            }, new Date('2026-04-29T15:30:00.000Z'), attemptedClockOut);
+
+            return {
+                effectiveEnd: projection.effectiveEnd,
+                updatedState: projection.updatedCard.state,
+                updatedClockOut: projection.updatedCard.clockOut,
+                hasClockOutEvent: Boolean(projection.requestBody.clockOutEvent),
+            };
+        },
+    },
+    {
+        name: 'cache-snapshot',
+        requiresAuth: false,
+        run: async context => appApi.getPersistedTimeCardCacheSnapshotForSelfTest(context.params.teamId),
+    },
+    {
+        name: 'confirm-supported-timecard-filters',
+        requiresAuth: true,
+        run: async context => {
+            const team = await requireTeam(context);
+            return {
+                teamId: team.id,
+                support: assertDocumentedFilterSupport(
+                    await appApi.probeTimeCardDocumentedFilterSupport(team.id, context.params.force),
+                ),
+            };
+        },
+    },
+    {
+        name: 'confirm-no-combined-week-query',
+        requiresAuth: true,
+        run: async context => {
+            const team = await requireTeam(context);
+            const result = assertProbeRejected(
+                await appApi.probeTimeCardCombinedWeekQuerySupport(team.id, context.params.week, context.params.force),
+                'combined weekly timecard query support',
+            );
+            return {
+                teamId: team.id,
+                supported: result,
+            };
+        },
     },
     {
         name: 'joined-teams',
@@ -160,11 +254,40 @@ const tests = [
         },
     },
     {
-        name: 'lastmodified-filter-probe',
+        name: 'selected-week-fetch-timing',
         requiresAuth: true,
         run: async context => {
             const team = await requireTeam(context);
-            const result = await appApi.probeTimeCardLastModifiedFilterSupport(team.id, context.params.force);
+            return {
+                teamId: team.id,
+                timing: await appApi.fetchWeekTimeCardsForSelfTest(team.id, context.params.week, { includeTiming: true }),
+            };
+        },
+    },
+    {
+        name: 'server-vs-cache',
+        requiresAuth: true,
+        run: async context => {
+            const team = await requireTeam(context);
+            const serverWeek = await appApi.fetchWeekTimeCardsForSelfTest(team.id, context.params.week, { includeTiming: false });
+
+            return {
+                teamId: team.id,
+                selectedWeek: serverWeek.weekStart,
+                cache: appApi.getPersistedTimeCardCacheSnapshotForSelfTest(team.id),
+                serverWeek,
+            };
+        },
+    },
+    {
+        name: 'confirm-no-lastmodified-filter',
+        requiresAuth: true,
+        run: async context => {
+            const team = await requireTeam(context);
+            const result = assertProbeRejected(
+                await appApi.probeTimeCardLastModifiedFilterSupport(team.id, context.params.force),
+                'lastModifiedDateTime filter support',
+            );
             return {
                 teamId: team.id,
                 supported: result,
@@ -172,11 +295,14 @@ const tests = [
         },
     },
     {
-        name: 'lastmodified-orderby-probe',
+        name: 'confirm-no-lastmodified-orderby',
         requiresAuth: true,
         run: async context => {
             const team = await requireTeam(context);
-            const result = await appApi.probeTimeCardLastModifiedOrderBySupport(team.id, context.params.force);
+            const result = assertProbeRejected(
+                await appApi.probeTimeCardLastModifiedOrderBySupport(team.id, context.params.force),
+                'lastModifiedDateTime orderby support',
+            );
             return {
                 teamId: team.id,
                 supported: result,

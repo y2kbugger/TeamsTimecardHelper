@@ -12,19 +12,14 @@
     // ─────────────────────────────────────────────
     const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
     const SESSION_KEY_SELECTED_WEEK = 'tc_selected_week';
-    const SESSION_KEY_LASTMOD_FILTER_PROBE = 'tc_lastmodified_filter_probe';
-    const SESSION_KEY_LASTMOD_ORDERBY_PROBE = 'tc_lastmodified_orderby_probe';
-    const SESSION_KEY_TIMECARD_CACHE_PREFIX = 'tc_timecard_cache_v1';
-    const CLIENT_TEMP_ID_PREFIX = 'client-temp:';
+    const SESSION_CACHE_KEY_JOINED_TEAMS = 'tc_joined_teams';
     const SNAP_MINUTES = 5;
     const DEFAULT_BREAK_DURATION_MS = 10 * 60 * 1000;
     const EXTEND_TO_NOW_LAG_MS = 30 * 1000;
-    const CARD_EVENT_MATCH_TOLERANCE_MS = 60 * 1000;
     const DAY_MS = 24 * 60 * 60 * 1000;
     const CACHE_STALE_MS = 45 * 1000;
     const BACKGROUND_REFRESH_MS = 30 * 1000;
-    const PENDING_ACTION_TTL_MS = 2 * 60 * 1000;
-    const TIMECARD_PAGE_SIZE = 40;
+    const TIMECARD_PAGE_SIZE = 250;
 
     const auth = window.timecardsAuth;
     const graphFetch = (...args) => auth.graphFetch(...args);
@@ -38,12 +33,9 @@
     let highlightedCardId = null;
     let latestVisibleCardId = null;
     let selectedWeekStart = null;
-    let timeCardRefreshPromise = null;
     let liveClockTimerId = null;
     let backgroundRefreshTimerId = null;
-    const teamTimeCardCache = new Map();
-    const pendingCardMutations = new Map();
-
+    const timeCardCache = createTeamCacheState();
     // Edit modal state
     let editTarget = null;       // { card, weekStartTs }
 
@@ -139,8 +131,7 @@
     async function handleSignOut() {
         stopLiveClockUpdates();
         stopBackgroundRefreshLoop();
-        pendingCardMutations.clear();
-        teamTimeCardCache.clear();
+        resetTeamCache(timeCardCache, '', { clearProbes: true });
         selectedTeam = null;
         activeTimeCard = null;
         highlightedCardId = null;
@@ -148,9 +139,7 @@
         allTimeCards = [];
         localStorage.removeItem(SESSION_KEY_SELECTED_TEAM_ID);
         localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
-        clearPersistedTimeCardFilterProbes();
-        clearPersistedTimeCardOrderByProbes();
-        clearPersistedTimeCardCaches();
+        sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
         updateDocumentTitle();
         await auth.signOut();
     }
@@ -215,7 +204,7 @@
         toolbarTitle.textContent = 'Loading team…';
         showStatusPanel('<span class="spinner"></span>Loading teams…');
         try {
-            allTeams = await fetchJoinedTeamsForSelfTest();
+            allTeams = await fetchJoinedTeamsForSelfTest({ preferCache: true });
             if (!allTeams.length) {
                 localStorage.removeItem(SESSION_KEY_SELECTED_TEAM_ID);
                 showStatusPanel('No teams found.');
@@ -248,9 +237,51 @@
         }
     }
 
-    async function fetchJoinedTeamsForSelfTest() {
+    function normalizeJoinedTeams(teams) {
+        return (teams || [])
+            .filter(team => team?.id && team?.displayName)
+            .map(team => ({
+                id: team.id,
+                displayName: team.displayName,
+                description: team.description || '',
+            }))
+            .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    }
+
+    function readCachedJoinedTeams() {
+        const raw = sessionStorage.getItem(SESSION_CACHE_KEY_JOINED_TEAMS);
+        if (!raw) {
+            return null;
+        }
+
+        try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) {
+                throw new Error('Joined team cache was not an array.');
+            }
+            return normalizeJoinedTeams(parsed);
+        } catch {
+            sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
+            return null;
+        }
+    }
+
+    function writeCachedJoinedTeams(teams) {
+        sessionStorage.setItem(SESSION_CACHE_KEY_JOINED_TEAMS, JSON.stringify(normalizeJoinedTeams(teams)));
+    }
+
+    async function fetchJoinedTeamsForSelfTest({ preferCache = false } = {}) {
+        if (preferCache) {
+            const cachedTeams = readCachedJoinedTeams();
+            if (cachedTeams !== null) {
+                return cachedTeams;
+            }
+        }
+
         const data = await graphFetch('/me/joinedTeams?$select=id,displayName,description');
-        return (data?.value || []).sort((a, b) => a.displayName.localeCompare(b.displayName));
+        const teams = normalizeJoinedTeams(data?.value || []);
+        writeCachedJoinedTeams(teams);
+        return teams;
     }
 
     async function resolveTeamForSelfTest(preferredTeamId = '') {
@@ -309,28 +340,29 @@
         syncWeekControls();
 
         const cache = getTeamCache(selectedTeam.id);
-        if (cache.cards.length) {
-            applyTimeCards(cache.cards);
+        const selectedWeekKey = getWeekCacheKey(selectedWeekStart);
+        const hasCachedWeek = cache.currentWeekKey === selectedWeekKey;
+        const cachedCards = hasCachedWeek ? cache.currentWeekCards : [];
+        const cachedFetchedAt = hasCachedWeek ? cache.currentWeekFetchedAt : 0;
+
+        if (cachedCards.length) {
+            applyTimeCards(cachedCards);
             tcLoading.style.display = 'none';
         } else {
             weeksContainer.style.display = 'none';
             tcLoading.style.display = 'block';
         }
 
-        void probeTimeCardLastModifiedFilterSupport(selectedTeam.id);
-        void probeTimeCardLastModifiedOrderBySupport(selectedTeam.id);
-
-        const shouldRefresh = !cache.cards.length
-            || !canCacheCoverWeek(cache, selectedWeekStart)
-            || (Date.now() - cache.fetchedAt) > CACHE_STALE_MS;
+        const shouldRefresh = !cachedCards.length
+            || (Date.now() - cachedFetchedAt) > CACHE_STALE_MS;
         if (!shouldRefresh) {
             return;
         }
 
         try {
-            await refreshTimeCards({ forceSpinner: !cache.cards.length });
+            await refreshTimeCards({ forceSpinner: !cachedCards.length });
         } catch (e) {
-            if (!cache.cards.length) {
+            if (!cachedCards.length) {
                 tcLoading.style.display = 'none';
                 weeksContainer.style.display = 'none';
             }
@@ -340,97 +372,80 @@
 
     async function refreshTimeCards({ forceSpinner = false, reset = false } = {}) {
         if (!selectedTeam) return;
-        const cache = getTeamCache(selectedTeam.id);
-        if (cache.promise) {
-            return cache.promise;
-        }
+        ensureSelectedWeek();
+        const teamId = selectedTeam.id;
+        const targetWeekStart = getResolvedWeekStart(selectedWeekStart);
+        const targetWeekKey = getWeekCacheKey(targetWeekStart);
+        const cache = getTeamCache(teamId);
 
         if (reset) {
-            resetTeamCache(cache, selectedTeam.id);
+            resetTeamCache(cache, teamId);
         }
 
-        ensureSelectedWeek();
-        const targetWeekStart = getWeekStart(selectedWeekStart || new Date());
+        const hasCachedWeek = cache.currentWeekKey === targetWeekKey;
 
-        if (forceSpinner && !cache.cards.length) {
+        if (cache.pendingWeekKey === targetWeekKey && cache.pendingWeekPromise) {
+            return cache.pendingWeekPromise;
+        }
+
+        if (forceSpinner && !(hasCachedWeek && cache.currentWeekCards.length)) {
             weeksContainer.style.display = 'none';
             tcLoading.style.display = 'block';
         }
 
         const request = (async () => {
-            const orderBySupport = await probeTimeCardLastModifiedOrderBySupport(selectedTeam.id);
-            const useNewestFirstPaging = orderBySupport === true;
-            const snapshot = {
-                cards: useNewestFirstPaging && !reset ? cache.cards.slice() : [],
-                coveredThroughMs: useNewestFirstPaging && !reset ? cache.coveredThroughMs : Number.POSITIVE_INFINITY,
-            };
-            const hadFullHistory = useNewestFirstPaging && !reset && cache.exhausted;
-            let nextUrl = buildTimeCardsPageUrl(selectedTeam.id, { newestFirst: useNewestFirstPaging });
-            let fetchedPages = 0;
+            const snapshot = await fetchWeekTimeCards(teamId, targetWeekStart);
+            setCachedWeek(cache, targetWeekStart, snapshot.cards, snapshot.fetchedAt);
+            maybeWarnAboutPagedWeek(cache, targetWeekKey, snapshot.pageCount);
+            const knownActiveCardWasReturned = Boolean(
+                cache.activeCard && snapshot.cards.some(card => card.id === cache.activeCard.id),
+            );
+            cache.activeCard = snapshot.activeCard
+                || (knownActiveCardWasReturned ? null : cache.activeCard);
 
-            while (nextUrl) {
-                const data = await graphFetch(nextUrl);
-                const pageCards = (data?.value || []).map(normalizeCard);
-                fetchedPages += 1;
-                mergeCardsIntoCache(snapshot, pageCards);
-                updateCacheCoverage(snapshot, pageCards, useNewestFirstPaging);
-                nextUrl = data?.['@odata.nextLink'] || null;
-
-                if (useNewestFirstPaging && fetchedPages >= 1 && canCacheCoverWeek(snapshot, targetWeekStart)) {
-                    break;
-                }
+            if (selectedTeam && selectedTeam.id === teamId && getWeekCacheKey(selectedWeekStart) === targetWeekKey) {
+                applyTimeCards(cache.currentWeekCards);
             }
 
-            snapshot.cards = reconcilePendingCardMutations(snapshot.cards, cache.teamId);
-            snapshot.coveredThroughMs = recomputeCoveredThroughMs(snapshot.cards, useNewestFirstPaging);
-
-            cache.cards = snapshot.cards;
-            cache.coveredThroughMs = snapshot.coveredThroughMs;
-            cache.nextUrl = hadFullHistory ? null : nextUrl;
-            cache.exhausted = hadFullHistory ? true : !nextUrl;
-            cache.fetchedAt = Date.now();
-            cache.promise = null;
-            timeCardRefreshPromise = null;
-            persistTeamCacheToStorage(cache);
-
-            if (selectedTeam && selectedTeam.id === cache.teamId) {
-                applyTimeCards(cache.cards);
+            return cache.currentWeekCards;
+        })().finally(() => {
+            if (cache.pendingWeekKey === targetWeekKey) {
+                cache.pendingWeekKey = '';
+                cache.pendingWeekPromise = null;
             }
-
-            void probeTimeCardLastModifiedFilterSupport(cache.teamId);
-            void probeTimeCardLastModifiedOrderBySupport(cache.teamId);
-        })().catch(err => {
-            cache.promise = null;
-            timeCardRefreshPromise = null;
-            throw err;
         });
 
-        cache.promise = request;
-        timeCardRefreshPromise = request;
+        cache.pendingWeekKey = targetWeekKey;
+        cache.pendingWeekPromise = request;
         return request;
     }
 
+    function createTeamCacheState(teamId = '') {
+        return {
+            teamId,
+            activeCard: null,
+            currentWeekKey: '',
+            currentWeekCards: [],
+            currentWeekFetchedAt: 0,
+            pendingWeekKey: '',
+            pendingWeekPromise: null,
+            warnedMultiPageWeekKey: '',
+            lastModifiedFilterSupport: null,
+            lastModifiedFilterProbePromise: null,
+            lastModifiedOrderBySupport: null,
+            lastModifiedOrderByProbePromise: null,
+            filterSupportMatrix: null,
+            filterSupportProbePromise: null,
+            combinedWeekQuerySupport: null,
+            combinedWeekQueryProbePromise: null,
+        };
+    }
+
     function getTeamCache(teamId) {
-        if (!teamTimeCardCache.has(teamId)) {
-            const cache = {
-                teamId,
-                cards: [],
-                fetchedAt: 0,
-                promise: null,
-                nextUrl: buildTimeCardsPageUrl(teamId),
-                exhausted: false,
-                coveredThroughMs: Number.POSITIVE_INFINITY,
-                lastModifiedFilterSupport: null,
-                lastModifiedFilterProbePromise: null,
-                lastModifiedOrderBySupport: null,
-                lastModifiedOrderByProbePromise: null,
-            };
-            hydrateTeamCacheFromStorage(cache);
-            hydrateTimeCardFilterProbe(cache);
-            hydrateTimeCardOrderByProbe(cache);
-            teamTimeCardCache.set(teamId, cache);
+        if (timeCardCache.teamId !== teamId) {
+            resetTeamCache(timeCardCache, teamId, { clearProbes: true });
         }
-        return teamTimeCardCache.get(teamId);
+        return timeCardCache;
     }
 
     function buildTimeCardsPageUrl(teamId, { newestFirst = false, pageSize = TIMECARD_PAGE_SIZE } = {}) {
@@ -441,151 +456,82 @@
         return url;
     }
 
-    function buildTimeCardCacheStorageKey(teamId) {
-        const accountKey = auth.getAccountStorageKey();
-        return `${SESSION_KEY_TIMECARD_CACHE_PREFIX}:${accountKey}:${teamId}`;
+    function getResolvedWeekStart(weekStartInput = null) {
+        if (weekStartInput instanceof Date && !Number.isNaN(weekStartInput.getTime())) {
+            return getWeekStart(weekStartInput);
+        }
+
+        if (typeof weekStartInput === 'string' && weekStartInput) {
+            const parsed = /^\d{4}-\d{2}-\d{2}$/.test(weekStartInput)
+                ? new Date(`${weekStartInput}T00:00:00`)
+                : new Date(weekStartInput);
+            if (!Number.isNaN(parsed.getTime())) {
+                return getWeekStart(parsed);
+            }
+        }
+
+        if (selectedWeekStart instanceof Date && !Number.isNaN(selectedWeekStart.getTime())) {
+            return getWeekStart(selectedWeekStart);
+        }
+
+        const storedWeek = localStorage.getItem(SESSION_KEY_SELECTED_WEEK);
+        if (storedWeek) {
+            const parsed = new Date(`${storedWeek}T00:00:00`);
+            if (!Number.isNaN(parsed.getTime())) {
+                return getWeekStart(parsed);
+            }
+        }
+
+        const fallback = activeTimeCard?.clockIn?.dateTime
+            ? new Date(activeTimeCard.clockIn.dateTime)
+            : new Date();
+        return getWeekStart(fallback);
     }
 
-    function buildTimeCardFilterProbeStorageKey(teamId) {
-        const accountKey = auth.getAccountStorageKey();
-        return `${SESSION_KEY_LASTMOD_FILTER_PROBE}:${accountKey}:${teamId}`;
+    function getWeekCacheKey(weekStartInput) {
+        return formatDateInputValue(getResolvedWeekStart(weekStartInput));
     }
 
-    function buildTimeCardOrderByProbeStorageKey(teamId) {
-        const accountKey = auth.getAccountStorageKey();
-        return `${SESSION_KEY_LASTMOD_ORDERBY_PROBE}:${accountKey}:${teamId}`;
+    function setCachedWeek(cache, weekStartInput, cards, fetchedAt = Date.now()) {
+        cache.currentWeekKey = getWeekCacheKey(weekStartInput);
+        cache.currentWeekCards = dedupeCardsById(cards);
+        cache.currentWeekFetchedAt = fetchedAt;
+        return cache.currentWeekCards;
     }
 
-    function resetTeamCache(cache, teamId = cache.teamId) {
+    function resetTeamCache(cache, teamId = cache.teamId, { clearProbes = false } = {}) {
         cache.teamId = teamId;
-        cache.cards = [];
-        cache.fetchedAt = 0;
-        cache.promise = null;
-        cache.nextUrl = buildTimeCardsPageUrl(teamId);
-        cache.exhausted = false;
-        cache.coveredThroughMs = Number.POSITIVE_INFINITY;
-    }
+        cache.activeCard = null;
+        cache.currentWeekKey = '';
+        cache.currentWeekCards = [];
+        cache.currentWeekFetchedAt = 0;
+        cache.pendingWeekKey = '';
+        cache.pendingWeekPromise = null;
+        cache.warnedMultiPageWeekKey = '';
 
-    function hydrateTeamCacheFromStorage(cache) {
-        try {
-            const raw = localStorage.getItem(buildTimeCardCacheStorageKey(cache.teamId));
-            if (!raw) return;
-
-            const parsed = JSON.parse(raw);
-            if (!parsed || !Array.isArray(parsed.cards)) return;
-
-            cache.cards = parsed.cards;
-            cache.fetchedAt = Number(parsed.fetchedAt) || 0;
-            cache.coveredThroughMs = Number.isFinite(parsed.coveredThroughMs)
-                ? parsed.coveredThroughMs
-                : Number.POSITIVE_INFINITY;
-            cache.exhausted = parsed.exhausted !== false;
-            cache.nextUrl = cache.exhausted ? null : buildTimeCardsPageUrl(cache.teamId);
-        } catch {
-            localStorage.removeItem(buildTimeCardCacheStorageKey(cache.teamId));
+        if (clearProbes) {
+            cache.lastModifiedFilterSupport = null;
+            cache.lastModifiedFilterProbePromise = null;
+            cache.lastModifiedOrderBySupport = null;
+            cache.lastModifiedOrderByProbePromise = null;
+            cache.filterSupportMatrix = null;
+            cache.filterSupportProbePromise = null;
+            cache.combinedWeekQuerySupport = null;
+            cache.combinedWeekQueryProbePromise = null;
         }
     }
 
-    function hydrateTimeCardFilterProbe(cache) {
-        const scopedKey = buildTimeCardFilterProbeStorageKey(cache.teamId);
-        let raw = localStorage.getItem(scopedKey);
-        let migrateLegacy = false;
-
-        if (!raw) {
-            raw = localStorage.getItem(SESSION_KEY_LASTMOD_FILTER_PROBE);
-            migrateLegacy = !!raw;
-        }
-        if (!raw) return;
-
-        try {
-            const parsed = JSON.parse(raw);
-            if (!parsed || parsed.teamId !== cache.teamId) return;
-
-            cache.lastModifiedFilterSupport = parsed.status === 'supported'
-                ? true
-                : parsed.status === 'rejected'
-                    ? false
-                    : null;
-
-            if (migrateLegacy) {
-                localStorage.setItem(scopedKey, raw);
-                localStorage.removeItem(SESSION_KEY_LASTMOD_FILTER_PROBE);
+    function maybeWarnAboutPagedWeek(cache, weekKey, pageCount) {
+        if (pageCount > 1) {
+            if (cache.warnedMultiPageWeekKey !== weekKey) {
+                toast(`This week required ${pageCount} pages to load all timecards.`, 'warn');
+                cache.warnedMultiPageWeekKey = weekKey;
             }
-        } catch {
-            localStorage.removeItem(scopedKey);
+            return;
         }
-    }
 
-    function hydrateTimeCardOrderByProbe(cache) {
-        const scopedKey = buildTimeCardOrderByProbeStorageKey(cache.teamId);
-        let raw = localStorage.getItem(scopedKey);
-        let migrateLegacy = false;
-
-        if (!raw) {
-            raw = localStorage.getItem(SESSION_KEY_LASTMOD_ORDERBY_PROBE);
-            migrateLegacy = !!raw;
-        }
-        if (!raw) return;
-
-        try {
-            const parsed = JSON.parse(raw);
-            if (!parsed || parsed.teamId !== cache.teamId) return;
-
-            cache.lastModifiedOrderBySupport = parsed.status === 'supported'
-                ? true
-                : parsed.status === 'rejected'
-                    ? false
-                    : null;
-
-            if (migrateLegacy) {
-                localStorage.setItem(scopedKey, raw);
-                localStorage.removeItem(SESSION_KEY_LASTMOD_ORDERBY_PROBE);
-            }
-        } catch {
-            localStorage.removeItem(scopedKey);
-        }
-    }
-
-    function persistTeamCacheToStorage(cache) {
-        try {
-            localStorage.setItem(buildTimeCardCacheStorageKey(cache.teamId), JSON.stringify({
-                cards: cache.cards,
-                fetchedAt: cache.fetchedAt,
-                coveredThroughMs: cache.coveredThroughMs,
-                exhausted: cache.exhausted,
-            }));
-        } catch {
-            localStorage.removeItem(buildTimeCardCacheStorageKey(cache.teamId));
-        }
-    }
-
-    function clearPersistedTimeCardCaches() {
-        const prefix = `${SESSION_KEY_TIMECARD_CACHE_PREFIX}:`;
-        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-            const key = localStorage.key(index);
-            if (key && key.startsWith(prefix)) {
-                localStorage.removeItem(key);
-            }
-        }
-    }
-
-    function clearPersistedTimeCardFilterProbes() {
-        const prefix = `${SESSION_KEY_LASTMOD_FILTER_PROBE}:`;
-        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-            const key = localStorage.key(index);
-            if (key && key.startsWith(prefix)) {
-                localStorage.removeItem(key);
-            }
-        }
-    }
-
-    function clearPersistedTimeCardOrderByProbes() {
-        const prefix = `${SESSION_KEY_LASTMOD_ORDERBY_PROBE}:`;
-        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-            const key = localStorage.key(index);
-            if (key && key.startsWith(prefix)) {
-                localStorage.removeItem(key);
-            }
+        if (cache.warnedMultiPageWeekKey === weekKey) {
+            cache.warnedMultiPageWeekKey = '';
         }
     }
 
@@ -605,7 +551,6 @@
         const request = graphFetch(probeUrl)
             .then(() => {
                 cache.lastModifiedFilterSupport = true;
-                persistTimeCardFilterProbe(teamId, 'supported', 'Graph accepted a lastModifiedDateTime filter probe.');
                 console.info('[timecards] Graph accepts lastModifiedDateTime filter.');
                 return true;
             })
@@ -614,13 +559,11 @@
                 const rejectedByGraph = /lastmodifieddatetime|filter|not allowed|unsupported/i.test(message);
                 if (rejectedByGraph) {
                     cache.lastModifiedFilterSupport = false;
-                    persistTimeCardFilterProbe(teamId, 'rejected', message);
                     console.info('[timecards] Graph rejected lastModifiedDateTime filter.', message);
                     return false;
                 }
 
                 cache.lastModifiedFilterSupport = null;
-                persistTimeCardFilterProbe(teamId, 'error', message);
                 console.warn('[timecards] Could not probe lastModifiedDateTime filter.', message);
                 return null;
             })
@@ -630,15 +573,6 @@
 
         cache.lastModifiedFilterProbePromise = request;
         return request;
-    }
-
-    function persistTimeCardFilterProbe(teamId, status, message) {
-        localStorage.setItem(buildTimeCardFilterProbeStorageKey(teamId), JSON.stringify({
-            teamId,
-            status,
-            message,
-            checkedAt: new Date().toISOString(),
-        }));
     }
 
     async function probeTimeCardLastModifiedOrderBySupport(teamId, force = false) {
@@ -655,7 +589,6 @@
         const request = graphFetch(probeUrl)
             .then(() => {
                 cache.lastModifiedOrderBySupport = true;
-                persistTimeCardOrderByProbe(teamId, 'supported', 'Graph accepted lastModifiedDateTime desc orderby.');
                 console.info('[timecards] Graph accepts lastModifiedDateTime orderby.');
                 return true;
             })
@@ -664,13 +597,11 @@
                 const rejectedByGraph = /lastmodifieddatetime|orderby|order by|sort|not allowed|unsupported/i.test(message);
                 if (rejectedByGraph) {
                     cache.lastModifiedOrderBySupport = false;
-                    persistTimeCardOrderByProbe(teamId, 'rejected', message);
                     console.info('[timecards] Graph rejected lastModifiedDateTime orderby.', message);
                     return false;
                 }
 
                 cache.lastModifiedOrderBySupport = null;
-                persistTimeCardOrderByProbe(teamId, 'error', message);
                 console.warn('[timecards] Could not probe lastModifiedDateTime orderby.', message);
                 return null;
             })
@@ -682,13 +613,209 @@
         return request;
     }
 
-    function persistTimeCardOrderByProbe(teamId, status, message) {
-        localStorage.setItem(buildTimeCardOrderByProbeStorageKey(teamId), JSON.stringify({
-            teamId,
-            status,
-            message,
-            checkedAt: new Date().toISOString(),
-        }));
+    function isRejectedTimeCardFilterProbeError(message) {
+        return /filter|unsupported|not allowed|could not find a property|invalid/i.test(message || '');
+    }
+
+    function escapeODataStringLiteral(value) {
+        return String(value || '').replace(/'/g, "''");
+    }
+
+    function buildTimeCardFilterProbeUrl(teamId, filterExpr) {
+        return `/teams/${teamId}/schedule/timeCards?$top=1&$filter=${encodeURIComponent(filterExpr)}`;
+    }
+
+    async function probeSingleTimeCardFilterSupport(teamId, definition) {
+        let rejectedMessage = '';
+
+        for (const expression of definition.expressions) {
+            try {
+                await graphFetch(buildTimeCardFilterProbeUrl(teamId, expression));
+                return {
+                    label: definition.label,
+                    supported: true,
+                    acceptedExpression: expression,
+                    triedExpressions: definition.expressions,
+                    message: 'Graph accepted the filter expression.',
+                };
+            } catch (error) {
+                const message = error?.message || 'Unknown Graph error';
+                if (isRejectedTimeCardFilterProbeError(message)) {
+                    rejectedMessage = message;
+                    continue;
+                }
+
+                return {
+                    label: definition.label,
+                    supported: null,
+                    acceptedExpression: null,
+                    triedExpressions: definition.expressions,
+                    message,
+                };
+            }
+        }
+
+        return {
+            label: definition.label,
+            supported: false,
+            acceptedExpression: null,
+            triedExpressions: definition.expressions,
+            message: rejectedMessage || 'Graph rejected the filter expression.',
+        };
+    }
+
+    async function probeTimeCardDocumentedFilterSupport(teamId, force = false) {
+        if (!teamId) return null;
+        const cache = getTeamCache(teamId);
+        if (!force && cache.filterSupportMatrix) {
+            return cache.filterSupportMatrix;
+        }
+        if (cache.filterSupportProbePromise) {
+            return cache.filterSupportProbePromise;
+        }
+
+        const now = Date.now();
+        const lowerBoundIso = new Date(now - (30 * DAY_MS)).toISOString();
+        const upperBoundIso = new Date(now + DAY_MS).toISOString();
+        const currentUserId = auth.getCurrentAccount()?.localAccountId
+            || auth.getCurrentAccount()?.homeAccountId
+            || '00000000-0000-0000-0000-000000000000';
+
+        const definitions = [
+            {
+                key: 'clockInGe',
+                label: 'clockInEvent/dateTime ge',
+                expressions: [
+                    `clockInEvent/dateTime ge ${lowerBoundIso}`,
+                    `clockInEvent/datetime ge ${lowerBoundIso}`,
+                ],
+            },
+            {
+                key: 'clockInLe',
+                label: 'clockInEvent/dateTime le',
+                expressions: [
+                    `clockInEvent/dateTime le ${upperBoundIso}`,
+                    `clockInEvent/datetime le ${upperBoundIso}`,
+                ],
+            },
+            {
+                key: 'clockOutGe',
+                label: 'clockOutEvent/dateTime ge',
+                expressions: [
+                    `clockOutEvent/dateTime ge ${lowerBoundIso}`,
+                    `clockOutEvent/datetime ge ${lowerBoundIso}`,
+                ],
+            },
+            {
+                key: 'clockOutLe',
+                label: 'clockOutEvent/dateTime le',
+                expressions: [
+                    `clockOutEvent/dateTime le ${upperBoundIso}`,
+                    `clockOutEvent/datetime le ${upperBoundIso}`,
+                ],
+            },
+            {
+                key: 'stateEq',
+                label: 'state eq',
+                expressions: ["state eq 'clockedIn'"],
+            },
+            {
+                key: 'userIdEq',
+                label: 'userId eq',
+                expressions: [`userId eq '${escapeODataStringLiteral(currentUserId)}'`],
+            },
+        ];
+
+        const request = Promise.all(definitions.map(async definition => ({
+            key: definition.key,
+            result: await probeSingleTimeCardFilterSupport(teamId, definition),
+        })))
+            .then(entries => {
+                const matrix = {
+                    checkedAt: new Date().toISOString(),
+                };
+
+                entries.forEach(entry => {
+                    matrix[entry.key] = entry.result;
+                });
+
+                cache.filterSupportMatrix = matrix;
+                return matrix;
+            })
+            .finally(() => {
+                cache.filterSupportProbePromise = null;
+            });
+
+        cache.filterSupportProbePromise = request;
+        return request;
+    }
+
+    function buildCombinedWeekTimeCardFilter(weekStartInput) {
+        const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
+        const weekStartIso = weekStart.toISOString();
+        const weekEndIso = weekEndInclusive.toISOString();
+        return `((clockInEvent/dateTime le ${weekEndIso} and clockOutEvent/dateTime ge ${weekStartIso}) or state eq 'clockedIn' or state eq 'onBreak')`;
+    }
+
+    function buildSelectedWeekClockInWindowFilter(weekStartInput) {
+        const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
+        const weekStartIso = weekStart.toISOString();
+        const weekEndIso = weekEndInclusive.toISOString();
+        return `clockInEvent/dateTime ge ${weekStartIso} and clockInEvent/dateTime le ${weekEndIso}`;
+    }
+
+    async function probeTimeCardCombinedWeekQuerySupport(teamId, weekStartInput, force = false) {
+        if (!teamId) return null;
+        const cache = getTeamCache(teamId);
+        if (!force && cache.combinedWeekQuerySupport !== null) {
+            return cache.combinedWeekQuerySupport;
+        }
+        if (cache.combinedWeekQueryProbePromise) {
+            return cache.combinedWeekQueryProbePromise;
+        }
+
+        const filterExpr = buildCombinedWeekTimeCardFilter(weekStartInput);
+        const request = graphFetch(buildTimeCardsFilterUrl(teamId, filterExpr, { pageSize: 1 }))
+            .then(() => {
+                cache.combinedWeekQuerySupport = true;
+                return true;
+            })
+            .catch(error => {
+                const message = error?.message || 'Unknown Graph error';
+                const rejectedByGraph = /filter|unsupported|not allowed|could not find a property|invalid/i.test(message);
+                if (rejectedByGraph) {
+                    cache.combinedWeekQuerySupport = false;
+                    return false;
+                }
+
+                cache.combinedWeekQuerySupport = null;
+                console.warn('[timecards] Could not probe combined weekly timecard filter.', message);
+                return null;
+            })
+            .finally(() => {
+                cache.combinedWeekQueryProbePromise = null;
+            });
+
+        cache.combinedWeekQueryProbePromise = request;
+        return request;
+    }
+
+    async function confirmWeekTimeCardQuerySupport(teamId, weekStartInput) {
+        const support = await probeTimeCardDocumentedFilterSupport(teamId, false);
+        const requiredEntries = {
+            clockInGe: 'clockInEvent/dateTime ge',
+            clockInLe: 'clockInEvent/dateTime le',
+        };
+
+        const unsupported = Object.entries(requiredEntries)
+            .filter(([key]) => support?.[key]?.supported !== true)
+            .map(([, label]) => label);
+
+        if (unsupported.length) {
+            throw new Error(`Required timecard filters are unavailable: ${unsupported.join(', ')}`);
+        }
+
+        return true;
     }
 
     function mergeCardsIntoCache(cache, pageCards) {
@@ -703,40 +830,109 @@
         cache.cards = Array.from(byId.values());
     }
 
-    function updateCacheCoverage(cache, pageCards, newestFirst = false) {
-        pageCards.forEach(card => {
-            const coverageDateTime = getCardCoverageDateTime(card, newestFirst);
-            if (!coverageDateTime) {
-                return;
-            }
-            cache.coveredThroughMs = Math.min(cache.coveredThroughMs, new Date(coverageDateTime).getTime());
-        });
-    }
-
-    function getCardCoverageDateTime(card, newestFirst = false) {
-        if (newestFirst) {
-            return card?.lastModifiedDateTime || card?.createdDateTime || null;
-        }
-        if (!card || card.state === 'clockedIn' || card.state === 'onBreak') {
-            return null;
-        }
-        return card.clockOut?.dateTime || getCardAnchorDateTime(card) || card.lastModifiedDateTime || card.createdDateTime || null;
-    }
-
-    function canCacheCoverWeek(cache, weekStart) {
-        if (!cache.cards.length) {
+    function isOpenCardState(card) {
+        if (!card) {
             return false;
         }
-        if (cache.exhausted) {
-            return true;
+        const state = deriveCardState(card);
+        return state === 'clockedIn' || state === 'onBreak';
+    }
+
+    function getWeekRange(weekStartInput = null) {
+        const weekStart = getResolvedWeekStart(weekStartInput);
+        const weekEndExclusive = new Date(weekStart.getTime() + (7 * DAY_MS));
+        const weekEndInclusive = new Date(weekEndExclusive.getTime() - 1);
+
+        return {
+            weekStart,
+            weekEndExclusive,
+            weekEndInclusive,
+        };
+    }
+
+    function cardOverlapsRange(card, rangeStartMs, rangeEndExclusiveMs, referenceNowMs = Date.now()) {
+        if (!card?.clockIn?.dateTime) {
+            return false;
         }
-        const targetWeekStart = getWeekStart(weekStart || new Date()).getTime();
-        return cache.coveredThroughMs <= targetWeekStart;
+
+        const startMs = new Date(card.clockIn.dateTime).getTime();
+        const endMs = card.clockOut?.dateTime
+            ? new Date(card.clockOut.dateTime).getTime()
+            : referenceNowMs;
+
+        return startMs < rangeEndExclusiveMs && endMs >= rangeStartMs;
+    }
+
+    function filterCardsForWeek(cards, weekStartInput = null, referenceNowMs = Date.now()) {
+        const { weekStart, weekEndExclusive } = getWeekRange(weekStartInput);
+        return dedupeCardsById(cards).filter(card => cardOverlapsRange(
+            card,
+            weekStart.getTime(),
+            weekEndExclusive.getTime(),
+            referenceNowMs,
+        ));
+    }
+
+    function buildTimeCardsFilterUrl(teamId, filterExpr, { pageSize = TIMECARD_PAGE_SIZE } = {}) {
+        return `/teams/${teamId}/schedule/timeCards?$top=${pageSize}&$filter=${encodeURIComponent(filterExpr)}`;
+    }
+
+    async function fetchTimeCardsByFilter(teamId, filterExpr, { pageSize = TIMECARD_PAGE_SIZE } = {}) {
+        const snapshot = { cards: [] };
+        let nextUrl = buildTimeCardsFilterUrl(teamId, filterExpr, { pageSize });
+        let pageCount = 0;
+
+        while (nextUrl) {
+            const data = await graphFetch(nextUrl);
+            const pageCards = (data?.value || []).map(normalizeCard);
+            pageCount += 1;
+            mergeCardsIntoCache(snapshot, pageCards);
+            nextUrl = data?.['@odata.nextLink'] || null;
+        }
+
+        return {
+            cards: snapshot.cards,
+            pageCount,
+        };
+    }
+
+    async function fetchWeekTimeCards(teamId, weekStartInput, { includeTiming = false } = {}) {
+        const filterExpr = buildSelectedWeekClockInWindowFilter(weekStartInput);
+        const startedAt = includeTiming ? performance.now() : 0;
+        const result = await fetchTimeCardsByFilter(teamId, filterExpr, { pageSize: TIMECARD_PAGE_SIZE });
+        const durationMs = includeTiming ? Math.round(performance.now() - startedAt) : null;
+        const mergedCards = dedupeCardsById(result.cards);
+        const filteredCards = filterCardsForWeek(mergedCards, weekStartInput);
+        const activeCards = filteredCards
+            .filter(card => isOpenCardState(card))
+            .sort((a, b) => getCardSortMs(b) - getCardSortMs(a));
+        const fetchedAt = Date.now();
+
+        return {
+            weekStart: getResolvedWeekStart(weekStartInput),
+            weekKey: getWeekCacheKey(weekStartInput),
+            fetchedAt,
+            activeCard: activeCards.find(card => isOpenCardState(card)) || null,
+            cards: filteredCards,
+            timings: includeTiming ? {
+                totalDurationMs: durationMs,
+                queries: [{
+                    key: 'selectedWeekClockInWindow',
+                    label: 'Selected week cards by clock-in window',
+                    filter: filterExpr,
+                    cardsCount: mergedCards.length,
+                    pageCount: result.pageCount,
+                    durationMs,
+                }],
+            } : null,
+        };
     }
 
     function applyTimeCards(cards) {
-        allTimeCards = cards.slice();
-        activeTimeCard = allTimeCards.find(c => c.state === 'clockedIn' || c.state === 'onBreak') || null;
+        allTimeCards = filterCardsForWeek(cards, selectedWeekStart);
+        activeTimeCard = selectedTeam
+            ? (getTeamCache(selectedTeam.id).activeCard || null)
+            : null;
         if (highlightedCardId && !allTimeCards.some(card => card.id === highlightedCardId)) {
             highlightedCardId = null;
         }
@@ -853,137 +1049,162 @@
         return itemBody?.content || '';
     }
 
-    function dateTimesMatch(serverEvent, localEvent, toleranceMs = CARD_EVENT_MATCH_TOLERANCE_MS) {
-        const serverDateTime = getEventDateTime(serverEvent);
-        const localDateTime = getEventDateTime(localEvent);
-
-        if (!serverDateTime && !localDateTime) {
-            return true;
-        }
-        if (!serverDateTime || !localDateTime) {
-            return false;
-        }
-
-        return Math.abs(new Date(serverDateTime).getTime() - new Date(localDateTime).getTime()) <= toleranceMs;
+    function getSelectedWeekCards(cards) {
+        return filterCardsForWeek(cards, selectedWeekStart);
     }
 
-    function breaksMatchForUi(serverBreaks, localBreaks) {
-        if (serverBreaks.length !== localBreaks.length) {
-            return false;
+    function upsertCardInLoadedWeeks(cache, updatedCard, touchedAt = Date.now()) {
+        if (!cache.currentWeekKey) {
+            return;
         }
 
-        for (let index = 0; index < localBreaks.length; index += 1) {
-            const serverBreak = serverBreaks[index] || {};
-            const localBreak = localBreaks[index] || {};
+        const { weekStart, weekEndExclusive } = getWeekRange(cache.currentWeekKey);
+        const overlapsWeek = cardOverlapsRange(
+            updatedCard,
+            weekStart.getTime(),
+            weekEndExclusive.getTime(),
+        );
+        const cardIndex = cache.currentWeekCards.findIndex(card => card.id === updatedCard.id);
 
-            if (localBreak.breakId && serverBreak.breakId && localBreak.breakId !== serverBreak.breakId) {
-                return false;
+        if (!overlapsWeek) {
+            if (cardIndex !== -1) {
+                cache.currentWeekCards.splice(cardIndex, 1);
+                cache.currentWeekFetchedAt = touchedAt;
             }
-            if (!dateTimesMatch(serverBreak.start, localBreak.start)) {
-                return false;
-            }
-            if (!dateTimesMatch(serverBreak.end, localBreak.end)) {
-                return false;
-            }
+            return;
         }
 
-        return true;
+        if (cardIndex === -1) {
+            cache.currentWeekCards.push(updatedCard);
+        } else {
+            cache.currentWeekCards[cardIndex] = updatedCard;
+        }
+
+        cache.currentWeekCards = dedupeCardsById(cache.currentWeekCards);
+        cache.currentWeekFetchedAt = touchedAt;
     }
 
-    function recomputeCoveredThroughMs(cards, newestFirst = false) {
-        let coveredThroughMs = Number.POSITIVE_INFINITY;
-        cards.forEach(card => {
-            const coverageDateTime = getCardCoverageDateTime(card, newestFirst);
-            if (!coverageDateTime) {
-                return;
-            }
-            coveredThroughMs = Math.min(coveredThroughMs, new Date(coverageDateTime).getTime());
-        });
-        return coveredThroughMs;
+    function removeCardFromLoadedWeeks(cache, cardId, touchedAt = Date.now()) {
+        if (!cache.currentWeekCards.length) {
+            return;
+        }
+
+        const cardIndex = cache.currentWeekCards.findIndex(card => card.id === cardId);
+        if (cardIndex !== -1) {
+            cache.currentWeekCards.splice(cardIndex, 1);
+            cache.currentWeekFetchedAt = touchedAt;
+        }
     }
 
-    function applyCardsLocally(nextCards) {
+    function renderSelectedWeekFromCache(cache) {
+        const selectedWeekKey = getWeekCacheKey(selectedWeekStart);
+        if (cache.currentWeekKey !== selectedWeekKey) {
+            return;
+        }
+
+        applyTimeCards(cache.currentWeekCards);
+    }
+
+    function applyCardsLocally(nextCards, { activeCard = activeTimeCard, fetchedAt = Date.now() } = {}) {
+        const visibleCards = getSelectedWeekCards(nextCards);
         if (selectedTeam) {
             const cache = getTeamCache(selectedTeam.id);
-            cache.cards = nextCards.slice();
-            cache.fetchedAt = Date.now();
-            cache.coveredThroughMs = recomputeCoveredThroughMs(cache.cards, cache.lastModifiedOrderBySupport === true);
-            persistTeamCacheToStorage(cache);
+            setCachedWeek(cache, selectedWeekStart, visibleCards, fetchedAt);
+            cache.activeCard = isOpenCardState(activeCard) ? activeCard : null;
         }
 
-        applyTimeCards(nextCards);
+        applyTimeCards(visibleCards);
     }
 
     function applyUpdatedCardLocally(updatedCard) {
-        const nextCards = allTimeCards.slice();
-        const cardIndex = nextCards.findIndex(item => item.id === updatedCard.id);
-        if (cardIndex === -1) {
-            nextCards.push(updatedCard);
-        } else {
-            nextCards[cardIndex] = updatedCard;
+        if (!selectedTeam) {
+            return;
         }
 
-        applyCardsLocally(nextCards);
-    }
+        const cache = getTeamCache(selectedTeam.id);
+        upsertCardInLoadedWeeks(cache, updatedCard);
 
-    function buildProjectedClockInCard(startTime = new Date()) {
-        const nowIso = startTime.toISOString();
-        return {
-            id: `${CLIENT_TEMP_ID_PREFIX}${startTime.getTime()}`,
-            state: 'clockedIn',
-            userId: auth.getCurrentAccount()?.localAccountId || auth.getCurrentAccount()?.homeAccountId || '',
-            createdDateTime: nowIso,
-            lastModifiedDateTime: nowIso,
-            clockIn: {
-                dateTime: nowIso,
-                atApprovedLocation: false,
-                notes: null,
-            },
-            clockOut: null,
-            breaks: [],
-            notes: null,
-        };
-    }
-
-    function getUpdatedCardForBreakState(card, action) {
-        const updatedCard = {
-            ...card,
-            clockIn: card.clockIn ? {
-                ...card.clockIn,
-            } : null,
-            clockOut: card.clockOut ? {
-                ...card.clockOut,
-            } : null,
-            breaks: cloneCardBreaks(card.breaks),
-            lastModifiedDateTime: new Date().toISOString(),
-        };
-
-        if (action === 'start') {
-            updatedCard.breaks.push({
-                breakId: undefined,
-                start: {
-                    dateTime: new Date().toISOString(),
-                    notes: null,
-                },
-                end: null,
-            });
+        if (isOpenCardState(updatedCard)) {
+            cache.activeCard = updatedCard;
+        } else if (activeTimeCard?.id === updatedCard.id) {
+            cache.activeCard = null;
         }
 
-        if (action === 'end') {
-            for (let index = updatedCard.breaks.length - 1; index >= 0; index -= 1) {
-                const currentBreak = updatedCard.breaks[index];
-                if (currentBreak.start && !currentBreak.end) {
-                    currentBreak.end = {
-                        dateTime: new Date().toISOString(),
-                        notes: null,
-                    };
-                    break;
-                }
+        renderSelectedWeekFromCache(cache);
+    }
+
+    function removeCardLocally(cardId) {
+        if (!selectedTeam || !cardId) {
+            return;
+        }
+
+        const cache = getTeamCache(selectedTeam.id);
+        removeCardFromLoadedWeeks(cache, cardId);
+        if (cache.activeCard?.id === cardId) {
+            cache.activeCard = null;
+        }
+        renderSelectedWeekFromCache(cache);
+    }
+
+    function requireTimeCardResponse(response, actionLabel) {
+        if (!response?.id) {
+            throw new Error(`${actionLabel} did not return an updated timecard.`);
+        }
+
+        return normalizeCard(response);
+    }
+
+    function resolveUpdatedTimeCard(response, fallbackCard, actionLabel) {
+        if (response?.id) {
+            return normalizeCard(response);
+        }
+        if (fallbackCard?.id) {
+            return fallbackCard;
+        }
+
+        throw new Error(`${actionLabel} did not return an updated timecard.`);
+    }
+
+    async function fetchTimeCardById(teamId, cardId) {
+        if (!teamId || !cardId) {
+            throw new Error('A teamId and cardId are required to fetch a timecard.');
+        }
+
+        const response = await graphFetch(`/teams/${teamId}/schedule/timeCards/${cardId}`);
+        return requireTimeCardResponse(response, 'Fetch timecard');
+    }
+
+    function storeFetchedWeekSnapshot(teamId, weekStartInput, snapshot) {
+        const cache = getTeamCache(teamId);
+        setCachedWeek(cache, weekStartInput, snapshot.cards, snapshot.fetchedAt);
+        maybeWarnAboutPagedWeek(cache, snapshot.weekKey, snapshot.pageCount);
+        cache.activeCard = snapshot.activeCard || null;
+        return snapshot.activeCard || null;
+    }
+
+    async function resolveTimeCardActionResponse(response, {
+        actionLabel,
+        teamId,
+        cardId = '',
+        weekStartInput = null,
+    } = {}) {
+        if (response?.id) {
+            return normalizeCard(response);
+        }
+
+        if (cardId) {
+            return fetchTimeCardById(teamId, cardId);
+        }
+
+        if (weekStartInput !== null) {
+            const snapshot = await fetchWeekTimeCards(teamId, weekStartInput);
+            const activeCard = storeFetchedWeekSnapshot(teamId, weekStartInput, snapshot);
+            if (activeCard?.id) {
+                return activeCard;
             }
         }
 
-        updatedCard.state = deriveCardState(updatedCard);
-        return updatedCard;
+        throw new Error(`${actionLabel} did not return an updated timecard.`);
     }
 
     function refreshTimeCardsInBackground(options = {}) {
@@ -1017,70 +1238,9 @@
                 if (document.hidden || !selectedTeam) {
                     return;
                 }
-                const cache = getTeamCache(selectedTeam.id);
-                if (cache.promise) {
-                    return;
-                }
                 refreshTimeCardsInBackground();
             }, BACKGROUND_REFRESH_MS);
         }
-    }
-
-    function rememberPendingCardMutation(card, options = {}) {
-        pendingCardMutations.set(card.id, {
-            teamId: selectedTeam?.id || '',
-            localCard: card,
-            isTemporary: options.isTemporary === true,
-            appliedAt: Date.now(),
-        });
-    }
-
-    function prunePendingCardMutations(teamId = '') {
-        const now = Date.now();
-        for (const [key, mutation] of pendingCardMutations.entries()) {
-            if ((teamId && mutation.teamId !== teamId) || (now - mutation.appliedAt) > PENDING_ACTION_TTL_MS) {
-                pendingCardMutations.delete(key);
-            }
-        }
-    }
-
-    function cardsSatisfySameUiState(serverCard, localCard) {
-        const serverState = deriveCardState(serverCard);
-        const localState = deriveCardState(localCard);
-        if (serverState !== localState) {
-            return false;
-        }
-        if (!dateTimesMatch(serverCard.clockIn, localCard.clockIn)) {
-            return false;
-        }
-        if (!dateTimesMatch(serverCard.clockOut, localCard.clockOut)) {
-            return false;
-        }
-        if (localState === 'onBreak' && !serverCard.breaks.some(item => item.start && !item.end)) {
-            return false;
-        }
-        if (!breaksMatchForUi(serverCard.breaks, localCard.breaks)) {
-            return false;
-        }
-        if (getItemBodyContent(serverCard.notes) !== getItemBodyContent(localCard.notes)) {
-            return false;
-        }
-        return true;
-    }
-
-    function findServerMatchForTemporaryCard(cards, mutation) {
-        const localStart = mutation.localCard.clockIn?.dateTime;
-        if (!localStart) {
-            return null;
-        }
-        const localStartMs = new Date(localStart).getTime();
-        return cards.find(card => {
-            if (!card.clockIn || card.clockOut) {
-                return false;
-            }
-            const serverStartMs = new Date(card.clockIn.dateTime).getTime();
-            return Math.abs(serverStartMs - localStartMs) <= (10 * 60 * 1000);
-        }) || null;
     }
 
     function dedupeCardsById(cards) {
@@ -1091,92 +1251,9 @@
         return Array.from(byId.values());
     }
 
-    function reconcilePendingCardMutations(cards, teamId) {
-        prunePendingCardMutations(teamId);
-        const nextCards = cards.slice();
-
-        for (const [key, mutation] of pendingCardMutations.entries()) {
-            if (mutation.teamId !== teamId) {
-                continue;
-            }
-
-            if (mutation.isTemporary) {
-                const matchedServerCard = findServerMatchForTemporaryCard(nextCards, mutation);
-                if (matchedServerCard) {
-                    pendingCardMutations.delete(key);
-                    continue;
-                }
-                nextCards.push(mutation.localCard);
-                continue;
-            }
-
-            const cardIndex = nextCards.findIndex(card => card.id === mutation.localCard.id);
-            if (cardIndex === -1) {
-                nextCards.push(mutation.localCard);
-                continue;
-            }
-
-            if (cardsSatisfySameUiState(nextCards[cardIndex], mutation.localCard)) {
-                pendingCardMutations.delete(key);
-                continue;
-            }
-
-            nextCards[cardIndex] = mutation.localCard;
-        }
-
-        return dedupeCardsById(nextCards);
-    }
-
-    function clearPendingMutationsSatisfiedByCard(card) {
-        for (const [key, mutation] of pendingCardMutations.entries()) {
-            if (mutation.teamId !== selectedTeam?.id) {
-                continue;
-            }
-
-            if (mutation.isTemporary) {
-                const matchedServerCard = findServerMatchForTemporaryCard([card], mutation);
-                if (matchedServerCard) {
-                    pendingCardMutations.delete(key);
-                }
-                continue;
-            }
-
-            if (mutation.localCard.id === card.id && cardsSatisfySameUiState(card, mutation.localCard)) {
-                pendingCardMutations.delete(key);
-            }
-        }
-    }
-
     function applyServerConfirmedCard(serverCard) {
-        for (const mutation of pendingCardMutations.values()) {
-            if (mutation.teamId !== selectedTeam?.id || mutation.isTemporary) {
-                continue;
-            }
-            if (mutation.localCard.id === serverCard.id && !cardsSatisfySameUiState(serverCard, mutation.localCard)) {
-                return false;
-            }
-        }
-
-        clearPendingMutationsSatisfiedByCard(serverCard);
         applyUpdatedCardLocally(serverCard);
         return true;
-    }
-
-    async function syncCardFromServer(cardId) {
-        if (!selectedTeam || !cardId) {
-            return false;
-        }
-
-        try {
-            const raw = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${cardId}`);
-            if (raw?.id) {
-                return applyServerConfirmedCard(normalizeCard(raw));
-            }
-        } catch {
-            // Fall through to broader refresh when targeted sync is unavailable.
-        }
-
-        return false;
     }
 
     function normalizeCard(raw) {
@@ -1256,25 +1333,11 @@
     }
 
     function getSelectedWeekGroup(cards) {
-        const weekStart = getWeekStart(selectedWeekStart || new Date());
-        const weekEndMs = weekStart.getTime() + (7 * DAY_MS);
-        const weekCards = cards.filter(card => {
-            const anchorDateTime = getCardAnchorDateTime(card);
-            if (!anchorDateTime) {
-                return card.state === 'clockedIn' || card.state === 'onBreak';
-            }
-            const anchorMs = new Date(anchorDateTime).getTime();
-            if (anchorMs >= weekStart.getTime() && anchorMs < weekEndMs) {
-                return true;
-            }
-            if ((card.state === 'clockedIn' || card.state === 'onBreak') && card.clockIn) {
-                const startMs = new Date(card.clockIn.dateTime).getTime();
-                return startMs < weekEndMs;
-            }
-            return false;
-        });
-
-        return { weekStart, cards: weekCards };
+        const weekStart = getResolvedWeekStart(selectedWeekStart);
+        return {
+            weekStart,
+            cards: filterCardsForWeek(cards, weekStart),
+        };
     }
 
     function getWeekStart(date) {
@@ -1527,7 +1590,9 @@
         interact('.tc-block')
             .draggable({
                 axis: 'x',
+                ignoreFrom: '.resize-handle, [data-end-ms=""]',
                 listeners: {
+                    start: markInteractionActive,
                     move: onTimelineDragMove,
                     end: onTimelineDragEnd,
                 },
@@ -1540,6 +1605,7 @@
                 },
                 axis: 'x',
                 listeners: {
+                    start: markInteractionActive,
                     move: onTimelineResizeMove,
                     end: onTimelineResizeEnd,
                 },
@@ -1550,6 +1616,7 @@
             .draggable({
                 axis: 'x',
                 listeners: {
+                    start: markInteractionActive,
                     move: onBreakDragMove,
                     end: onBreakDragEnd,
                 },
@@ -1562,11 +1629,45 @@
                 },
                 axis: 'x',
                 listeners: {
+                    start: markInteractionActive,
                     move: onBreakResizeMove,
                     end: onBreakResizeEnd,
                 },
                 inertia: false,
             });
+    }
+
+    function markInteractionActive(event) {
+        event.target.dataset.isInteracting = 'true';
+        if (event.edges?.left) {
+            event.target.dataset.resizeEdge = 'left';
+        } else if (event.edges?.right) {
+            event.target.dataset.resizeEdge = 'right';
+        } else {
+            delete event.target.dataset.resizeEdge;
+        }
+    }
+
+    function clearInteractionActive(el) {
+        delete el.dataset.isInteracting;
+        delete el.dataset.resizeEdge;
+    }
+
+    function isOpenTimelineBlock(el) {
+        return el.classList.contains('tc-block') && !el.dataset.endMs;
+    }
+
+    function getActiveResizeEdge(el, event) {
+        if (el.dataset.resizeEdge) {
+            return el.dataset.resizeEdge;
+        }
+        if (event?.edges?.left) {
+            return 'left';
+        }
+        if (event?.edges?.right) {
+            return 'right';
+        }
+        return '';
     }
 
     function getAxisWidth(tcBlock) {
@@ -1617,6 +1718,10 @@
 
     function onTimelineDragMove(event) {
         const el = event.target;
+        if (isOpenTimelineBlock(el)) {
+            return;
+        }
+
         const axisW = getAxisWidth(el);
         const totalSpanMs = parseInt(el.dataset.totalSpanMs, 10);
         const weekStartMs = parseInt(el.dataset.weekStartMs, 10);
@@ -1641,28 +1746,42 @@
     async function onTimelineDragEnd(event) {
         hideDragTooltip();
         const el = event.target;
-        const cardId = el.dataset.cardId;
-        const pendingStart = el.dataset.pendingStartMs;
-        const pendingEnd = el.dataset.pendingEndMs;
-        if (!pendingStart) return;
+        try {
+            if (isOpenTimelineBlock(el)) {
+                return;
+            }
 
-        const card = allTimeCards.find(c => c.id === cardId);
-        if (!card) return;
+            const cardId = el.dataset.cardId;
+            const pendingStart = el.dataset.pendingStartMs;
+            const pendingEnd = el.dataset.pendingEndMs;
+            if (!pendingStart) return;
 
-        const newStart = new Date(parseInt(pendingStart, 10));
-        const newEnd = pendingEnd ? new Date(parseInt(pendingEnd, 10)) : null;
+            const card = allTimeCards.find(c => c.id === cardId);
+            if (!card) return;
 
-        if (newEnd && newEnd <= newStart) {
-            toast('End time must be after start time', 'error');
-            reRenderWeeks();
-            return;
+            const newStart = new Date(parseInt(pendingStart, 10));
+            const newEnd = pendingEnd ? new Date(parseInt(pendingEnd, 10)) : null;
+
+            if (newEnd && newEnd <= newStart) {
+                toast('End time must be after start time', 'error');
+                reRenderWeeks();
+                return;
+            }
+
+            await persistCardTimeUpdate(card, newStart, newEnd);
+        } finally {
+            clearInteractionActive(el);
         }
-
-        await persistCardTimeUpdate(card, newStart, newEnd);
     }
 
     function onTimelineResizeMove(event) {
         const el = event.target;
+        const isOpenCard = isOpenTimelineBlock(el);
+        const activeResizeEdge = getActiveResizeEdge(el, event);
+        if (isOpenCard && activeResizeEdge === 'right') {
+            return;
+        }
+
         const axisW = getAxisWidth(el);
         const totalSpanMs = parseInt(el.dataset.totalSpanMs, 10);
         const weekStartMs = parseInt(el.dataset.weekStartMs, 10);
@@ -1681,34 +1800,50 @@
         const newStartMs = weekStartMs + msFromPct(newLeft, totalSpanMs);
         const newEndMs = newStartMs + msFromPct(newWidth, totalSpanMs);
 
+        el.dataset.pendingStartMs = snapMs(newStartMs);
+        if (isOpenCard) {
+            delete el.dataset.pendingEndMs;
+            showDragTooltip(event.clientX, event.clientY,
+                `${fmtTime(new Date(newStartMs))} → active`);
+            return;
+        }
+
         showDragTooltip(event.clientX, event.clientY,
             `${fmtTime(new Date(newStartMs))} → ${fmtTime(new Date(newEndMs))}`);
 
-        el.dataset.pendingStartMs = snapMs(newStartMs);
         el.dataset.pendingEndMs = snapMs(newEndMs);
     }
 
     async function onTimelineResizeEnd(event) {
         hideDragTooltip();
         const el = event.target;
-        const cardId = el.dataset.cardId;
-        const pendingStart = el.dataset.pendingStartMs;
-        const pendingEnd = el.dataset.pendingEndMs;
-        if (!pendingStart) return;
+        try {
+            const isOpenCard = isOpenTimelineBlock(el);
+            if (isOpenCard && getActiveResizeEdge(el, event) === 'right') {
+                return;
+            }
 
-        const card = allTimeCards.find(c => c.id === cardId);
-        if (!card) return;
+            const cardId = el.dataset.cardId;
+            const pendingStart = el.dataset.pendingStartMs;
+            const pendingEnd = el.dataset.pendingEndMs;
+            if (!pendingStart) return;
 
-        const newStart = new Date(parseInt(pendingStart, 10));
-        const newEnd = pendingEnd ? new Date(parseInt(pendingEnd, 10)) : null;
+            const card = allTimeCards.find(c => c.id === cardId);
+            if (!card) return;
 
-        if (newEnd && newEnd <= newStart) {
-            toast('End time must be after start time', 'error');
-            reRenderWeeks();
-            return;
+            const newStart = new Date(parseInt(pendingStart, 10));
+            const newEnd = isOpenCard || !pendingEnd ? null : new Date(parseInt(pendingEnd, 10));
+
+            if (newEnd && newEnd <= newStart) {
+                toast('End time must be after start time', 'error');
+                reRenderWeeks();
+                return;
+            }
+
+            await persistCardTimeUpdate(card, newStart, newEnd);
+        } finally {
+            clearInteractionActive(el);
         }
-
-        await persistCardTimeUpdate(card, newStart, newEnd);
     }
 
     function onBreakDragMove(event) {
@@ -1736,25 +1871,29 @@
     async function onBreakDragEnd(event) {
         hideDragTooltip();
         const el = event.target;
-        const card = allTimeCards.find(item => item.id === el.dataset.cardId);
-        const breakIndex = Number(el.dataset.breakIndex);
-        const pendingStart = Number(el.dataset.pendingStartMs);
-        const pendingEnd = Number(el.dataset.pendingEndMs);
+        try {
+            const card = allTimeCards.find(item => item.id === el.dataset.cardId);
+            const breakIndex = Number(el.dataset.breakIndex);
+            const pendingStart = Number(el.dataset.pendingStartMs);
+            const pendingEnd = Number(el.dataset.pendingEndMs);
 
-        if (!card || !Number.isInteger(breakIndex) || !Number.isFinite(pendingStart) || !Number.isFinite(pendingEnd)) {
-            reRenderWeeks();
-            return;
+            if (!card || !Number.isInteger(breakIndex) || !Number.isFinite(pendingStart) || !Number.isFinite(pendingEnd)) {
+                reRenderWeeks();
+                return;
+            }
+
+            const newStart = new Date(pendingStart);
+            const newEnd = new Date(pendingEnd);
+            if (newEnd <= newStart) {
+                toast('Break end must be after break start', 'error');
+                reRenderWeeks();
+                return;
+            }
+
+            await persistBreakTimeUpdate(card, breakIndex, newStart, newEnd);
+        } finally {
+            clearInteractionActive(el);
         }
-
-        const newStart = new Date(pendingStart);
-        const newEnd = new Date(pendingEnd);
-        if (newEnd <= newStart) {
-            toast('Break end must be after break start', 'error');
-            reRenderWeeks();
-            return;
-        }
-
-        await persistBreakTimeUpdate(card, breakIndex, newStart, newEnd);
     }
 
     function onBreakResizeMove(event) {
@@ -1800,25 +1939,29 @@
     async function onBreakResizeEnd(event) {
         hideDragTooltip();
         const el = event.target;
-        const card = allTimeCards.find(item => item.id === el.dataset.cardId);
-        const breakIndex = Number(el.dataset.breakIndex);
-        const pendingStart = Number(el.dataset.pendingStartMs);
-        const pendingEnd = Number(el.dataset.pendingEndMs);
+        try {
+            const card = allTimeCards.find(item => item.id === el.dataset.cardId);
+            const breakIndex = Number(el.dataset.breakIndex);
+            const pendingStart = Number(el.dataset.pendingStartMs);
+            const pendingEnd = Number(el.dataset.pendingEndMs);
 
-        if (!card || !Number.isInteger(breakIndex) || !Number.isFinite(pendingStart) || !Number.isFinite(pendingEnd)) {
-            reRenderWeeks();
-            return;
+            if (!card || !Number.isInteger(breakIndex) || !Number.isFinite(pendingStart) || !Number.isFinite(pendingEnd)) {
+                reRenderWeeks();
+                return;
+            }
+
+            const newStart = new Date(pendingStart);
+            const newEnd = new Date(pendingEnd);
+            if (newEnd <= newStart) {
+                toast('Break end must be after break start', 'error');
+                reRenderWeeks();
+                return;
+            }
+
+            await persistBreakTimeUpdate(card, breakIndex, newStart, newEnd);
+        } finally {
+            clearInteractionActive(el);
         }
-
-        const newStart = new Date(pendingStart);
-        const newEnd = new Date(pendingEnd);
-        if (newEnd <= newStart) {
-            toast('Break end must be after break start', 'error');
-            reRenderWeeks();
-            return;
-        }
-
-        await persistBreakTimeUpdate(card, breakIndex, newStart, newEnd);
     }
 
     function showDragTooltip(x, y, text) {
@@ -1967,19 +2110,18 @@
     async function doClockIn() {
         if (!selectedTeam) return;
         btnClockIn.disabled = true;
+        const teamId = selectedTeam.id;
         try {
-            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/clockIn`, {
+            const response = await graphFetch(`/teams/${teamId}/schedule/timeCards/clockIn`, {
                 method: 'POST',
                 body: JSON.stringify({ atApprovedLocation: false, notes: { contentType: 'text', content: '' } }),
             });
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                const projectedCard = buildProjectedClockInCard(new Date());
-                rememberPendingCardMutation(projectedCard, { isTemporary: true });
-                applyUpdatedCardLocally(projectedCard);
-                refreshTimeCardsInBackground();
-            }
+            const updatedCard = await resolveTimeCardActionResponse(response, {
+                actionLabel: 'Clock in',
+                teamId,
+                weekStartInput: getResolvedWeekStart(new Date()),
+            });
+            applyServerConfirmedCard(updatedCard);
             toast('Clocked in', 'success');
         } catch (e) {
             toast('Clock in failed: ' + e.message, 'error');
@@ -1990,25 +2132,19 @@
     async function doClockOut() {
         if (!activeTimeCard) return;
         btnClockOut.disabled = true;
+        const teamId = selectedTeam.id;
         const targetCard = activeTimeCard;
         try {
-            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${targetCard.id}/clockOut`, {
+            const response = await graphFetch(`/teams/${teamId}/schedule/timeCards/${targetCard.id}/clockOut`, {
                 method: 'POST',
                 body: JSON.stringify({ atApprovedLocation: false, notes: { contentType: 'text', content: '' } }),
             });
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                const projectedCard = getUpdatedCardForLocalState(targetCard, {
-                    clockIn: new Date(targetCard.clockIn.dateTime),
-                    clockOut: new Date(),
-                });
-                rememberPendingCardMutation(projectedCard);
-                applyUpdatedCardLocally(projectedCard);
-                if (!(await syncCardFromServer(targetCard.id))) {
-                    refreshTimeCardsInBackground();
-                }
-            }
+            const updatedCard = await resolveTimeCardActionResponse(response, {
+                actionLabel: 'Clock out',
+                teamId,
+                cardId: targetCard.id,
+            });
+            applyServerConfirmedCard(updatedCard);
             toast('Clocked out', 'success');
         } catch (e) {
             toast('Clock out failed: ' + e.message, 'error');
@@ -2019,22 +2155,19 @@
     async function doStartBreak() {
         if (!activeTimeCard) return;
         btnStartBreak.disabled = true;
+        const teamId = selectedTeam.id;
         const targetCard = activeTimeCard;
         try {
-            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${targetCard.id}/startBreak`, {
+            const response = await graphFetch(`/teams/${teamId}/schedule/timeCards/${targetCard.id}/startBreak`, {
                 method: 'POST',
                 body: JSON.stringify({ atApprovedLocation: false, notes: { contentType: 'text', content: '' } }),
             });
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                const projectedCard = getUpdatedCardForBreakState(targetCard, 'start');
-                rememberPendingCardMutation(projectedCard);
-                applyUpdatedCardLocally(projectedCard);
-                if (!(await syncCardFromServer(targetCard.id))) {
-                    refreshTimeCardsInBackground();
-                }
-            }
+            const updatedCard = await resolveTimeCardActionResponse(response, {
+                actionLabel: 'Start break',
+                teamId,
+                cardId: targetCard.id,
+            });
+            applyServerConfirmedCard(updatedCard);
             toast('Break started', 'success');
         } catch (e) {
             toast('Start break failed: ' + e.message, 'error');
@@ -2045,22 +2178,19 @@
     async function doEndBreak() {
         if (!activeTimeCard) return;
         btnEndBreak.disabled = true;
+        const teamId = selectedTeam.id;
         const targetCard = activeTimeCard;
         try {
-            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${targetCard.id}/endBreak`, {
+            const response = await graphFetch(`/teams/${teamId}/schedule/timeCards/${targetCard.id}/endBreak`, {
                 method: 'POST',
                 body: JSON.stringify({ atApprovedLocation: false, notes: { contentType: 'text', content: '' } }),
             });
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                const projectedCard = getUpdatedCardForBreakState(targetCard, 'end');
-                rememberPendingCardMutation(projectedCard);
-                applyUpdatedCardLocally(projectedCard);
-                if (!(await syncCardFromServer(targetCard.id))) {
-                    refreshTimeCardsInBackground();
-                }
-            }
+            const updatedCard = await resolveTimeCardActionResponse(response, {
+                actionLabel: 'End break',
+                teamId,
+                cardId: targetCard.id,
+            });
+            applyServerConfirmedCard(updatedCard);
             toast('Break ended', 'success');
         } catch (e) {
             toast('End break failed: ' + e.message, 'error');
@@ -2088,8 +2218,8 @@
             await graphFetchBeta(`/teams/${selectedTeam.id}/schedule/timeCards/${card.id}`, {
                 method: 'DELETE',
             });
+            removeCardLocally(card.id);
             toast('Timecard deleted', 'success');
-            await refreshTimeCards({ reset: true });
         } catch (e) {
             toast('Delete failed: ' + e.message, 'error');
         }
@@ -2137,14 +2267,12 @@
 
         try {
             const updatedCard = getUpdatedCardWithoutBreak(card, breakId);
-            await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${card.id}`, {
+            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${card.id}`, {
                 method: 'PUT',
                 body: JSON.stringify(buildTimeCardUpdateBody(updatedCard)),
             });
 
-            rememberPendingCardMutation(updatedCard);
-            applyUpdatedCardLocally(updatedCard);
-            refreshTimeCardsInBackground();
+            applyServerConfirmedCard(resolveUpdatedTimeCard(response, updatedCard, 'Delete break'));
 
             toast('Break deleted', 'success');
         } catch (e) {
@@ -2203,6 +2331,21 @@
   `;
         row.querySelector('button').addEventListener('click', () => row.remove());
         container.appendChild(row);
+    }
+
+    function parseEditModalDateTimeValue(inputValue, originalIso = '') {
+        if (!inputValue) {
+            return null;
+        }
+
+        if (originalIso) {
+            const originalDate = new Date(originalIso);
+            if (!Number.isNaN(originalDate.getTime()) && toLocalDatetimeInput(originalDate) === inputValue) {
+                return originalDate;
+            }
+        }
+
+        return new Date(inputValue);
     }
 
     function getEditModalTimeRangeMs() {
@@ -2289,8 +2432,8 @@
             toast('Clock-in time is required', 'error');
             return;
         }
-        const newStart = new Date(inVal);
-        const newEnd = outVal ? new Date(outVal) : null;
+        const newStart = parseEditModalDateTimeValue(inVal, editTarget.clockIn?.dateTime || '');
+        const newEnd = parseEditModalDateTimeValue(outVal, editTarget.clockOut?.dateTime || '');
 
         if (newEnd && newEnd <= newStart) {
             toast('Clock-out must be after clock-in', 'error');
@@ -2304,8 +2447,9 @@
             const bStart = row.querySelector('.break-start').value;
             const bEnd = row.querySelector('.break-end').value;
             if (!bStart) continue;
-            const bStartDt = new Date(bStart);
-            const bEndDt = bEnd ? new Date(bEnd) : null;
+            const existingBreak = editTarget.breaks.find(item => item.breakId === (row.dataset.breakId || '')) || null;
+            const bStartDt = parseEditModalDateTimeValue(bStart, existingBreak?.start?.dateTime || '');
+            const bEndDt = parseEditModalDateTimeValue(bEnd, existingBreak?.end?.dateTime || '');
 
             if (newEnd && bStartDt < newStart) { toast('Break start must be within card time range', 'error'); return; }
             if (newEnd && bEndDt && bEndDt > newEnd) { toast('Break end must be within card time range', 'error'); return; }
@@ -2335,13 +2479,7 @@
                 body: JSON.stringify(body),
             });
 
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                rememberPendingCardMutation(updatedCard);
-                applyUpdatedCardLocally(updatedCard);
-                refreshTimeCardsInBackground();
-            }
+            applyServerConfirmedCard(resolveUpdatedTimeCard(response, updatedCard, 'Save timecard'));
 
             toast('Timecard saved', 'success');
             closeEditModal();
@@ -2356,37 +2494,32 @@
     // ─────────────────────────────────────────────
     // Persist timeline drag/resize
     // ─────────────────────────────────────────────
-    async function persistCardTimeUpdate(card, newStart, newEnd) {
-        const body = {
-            clockInEvent: {
-                dateTime: newStart.toISOString(),
-                atApprovedLocation: card.clockIn?.atApprovedLocation ?? false,
-            },
-            breaks: card.breaks.map(b => ({
-                breakId: b.breakId,
-                start: b.start ? { dateTime: b.start.dateTime } : undefined,
-                end: b.end ? { dateTime: b.end.dateTime } : undefined,
-                notes: { contentType: 'text', content: '' },
-            })),
-            notes: card.notes || undefined,
+    function buildProjectedTimelineUpdate(card, newStart, newEnd) {
+        const effectiveEnd = card?.clockOut ? newEnd : null;
+        const updatedCard = getUpdatedCardForLocalState(card, {
+            clockIn: newStart,
+            clockOut: effectiveEnd,
+        });
+
+        return {
+            effectiveEnd,
+            updatedCard,
+            requestBody: buildTimeCardUpdateBody(updatedCard),
         };
-        if (newEnd) {
-            body.clockOutEvent = {
-                dateTime: newEnd.toISOString(),
-                atApprovedLocation: card.clockOut?.atApprovedLocation ?? false,
-            };
-        }
+    }
+
+    async function persistCardTimeUpdate(card, newStart, newEnd) {
+        const projection = buildProjectedTimelineUpdate(card, newStart, newEnd);
 
         try {
-            await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${card.id}`, {
+            const response = await graphFetch(`/teams/${selectedTeam.id}/schedule/timeCards/${card.id}`, {
                 method: 'PUT',
-                body: JSON.stringify(body),
+                body: JSON.stringify(projection.requestBody),
             });
-            applyUpdatedCardLocally(getUpdatedCardForLocalState(card, {
-                clockIn: newStart,
-                clockOut: newEnd,
-            }));
-            toast(`Updated: ${fmtTime(newStart)} → ${newEnd ? fmtTime(newEnd) : 'active'}`, 'success');
+
+            applyServerConfirmedCard(resolveUpdatedTimeCard(response, projection.updatedCard, 'Update timecard'));
+
+            toast(`Updated: ${fmtTime(newStart)} → ${projection.effectiveEnd ? fmtTime(projection.effectiveEnd) : 'active'}`, 'success');
         } catch (e) {
             toast('Update failed: ' + e.message, 'error');
             reRenderWeeks();
@@ -2478,13 +2611,7 @@
                 body: JSON.stringify(buildTimeCardUpdateBody(updatedCard)),
             });
 
-            if (response?.id) {
-                applyServerConfirmedCard(normalizeCard(response));
-            } else {
-                rememberPendingCardMutation(updatedCard);
-                applyUpdatedCardLocally(updatedCard);
-                refreshTimeCardsInBackground();
-            }
+            applyServerConfirmedCard(resolveUpdatedTimeCard(response, updatedCard, 'Break update'));
 
             toast(`Break updated: ${fmtTime(newStart)} → ${fmtTime(newEnd)}`, 'success');
         } catch (e) {
@@ -2608,6 +2735,10 @@
     }
 
     function updateLiveTimelineBlock(block) {
+        if (block.dataset.isInteracting === 'true') {
+            return;
+        }
+
         const cardId = block.dataset.cardId;
         const card = allTimeCards.find(item => item.id === cardId);
         if (!card || !card.clockIn || card.clockOut) {
@@ -2630,6 +2761,104 @@
         block.style.left = `${Math.max(0, leftPct)}%`;
         block.style.width = `${Math.max(0.1, widthPct)}%`;
         block.title = `${fmtDateTime(new Date(startMs))} (active)`;
+    }
+
+    function summarizeCardForDebug(card) {
+        if (!card) {
+            return null;
+        }
+
+        const openBreakCount = (card.breaks || []).filter(item => item.start && !item.end).length;
+        return {
+            id: card.id || null,
+            state: deriveCardState(card),
+            clockIn: card.clockIn?.dateTime || null,
+            clockOut: card.clockOut?.dateTime || null,
+            breakCount: Array.isArray(card.breaks) ? card.breaks.length : 0,
+            openBreakCount,
+            lastModifiedDateTime: card.lastModifiedDateTime || null,
+        };
+    }
+
+    function getPersistedTimeCardCacheSnapshotForSelfTest(teamId = '') {
+        const resolvedTeamId = teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
+        if (!resolvedTeamId) {
+            return {
+                selectedTeamId: '',
+                reason: 'No saved team is currently selected.',
+            };
+        }
+
+        const cache = getTeamCache(resolvedTeamId);
+        const now = Date.now();
+        const selectedWeek = getResolvedWeekStart();
+        const selectedWeekKey = getWeekCacheKey(selectedWeek);
+        const hasCurrentWeek = cache.currentWeekKey === selectedWeekKey;
+
+        return {
+            selectedTeamId: resolvedTeamId,
+            selectedWeek: selectedWeekKey,
+            storage: 'memory-only',
+            inMemory: {
+                cachedWeekKey: cache.currentWeekKey || null,
+                currentWeek: hasCurrentWeek ? {
+                    cardsCount: cache.currentWeekCards.length,
+                    fetchedAt: cache.currentWeekFetchedAt || 0,
+                    ageMs: cache.currentWeekFetchedAt ? (now - cache.currentWeekFetchedAt) : null,
+                    isStale: !cache.currentWeekFetchedAt || (now - cache.currentWeekFetchedAt) > CACHE_STALE_MS,
+                } : null,
+                hasPendingRequest: cache.pendingWeekKey === selectedWeekKey,
+                warnedMultiPageWeekKey: cache.warnedMultiPageWeekKey || null,
+                activeCard: summarizeCardForDebug(cache.activeCard),
+            },
+            persisted: null,
+            pendingMutations: [],
+            probes: {
+                lastModifiedFilterSupport: cache.lastModifiedFilterSupport,
+                lastModifiedOrderBySupport: cache.lastModifiedOrderBySupport,
+                filterSupportMatrix: cache.filterSupportMatrix,
+                combinedWeekQuerySupport: cache.combinedWeekQuerySupport,
+            },
+            timers: {
+                cacheStaleMs: CACHE_STALE_MS,
+                backgroundRefreshMs: BACKGROUND_REFRESH_MS,
+                pageSize: TIMECARD_PAGE_SIZE,
+            },
+        };
+    }
+
+    async function fetchWeekTimeCardsForSelfTest(teamId, weekStartInput = '', options = {}) {
+        await confirmWeekTimeCardQuerySupport(teamId);
+
+        const weekStart = getResolvedWeekStart(weekStartInput);
+        const snapshot = await fetchWeekTimeCards(teamId, weekStart, {
+            includeTiming: options.includeTiming === true,
+        });
+
+        return {
+            weekStart: formatDateInputValue(weekStart),
+            cardsCount: snapshot.cards.length,
+            activeCard: summarizeCardForDebug(snapshot.activeCard),
+            timings: snapshot.timings,
+            sample: snapshot.cards.slice(0, 10).map(summarizeCardForDebug),
+        };
+    }
+
+    async function resolveTimeCardActionResponseForSelfTest(teamId, options = {}) {
+        if (!teamId) {
+            throw new Error('A teamId is required for timecard action self tests');
+        }
+
+        const resolvedCard = await resolveTimeCardActionResponse(null, {
+            actionLabel: options.actionLabel || 'Timecard action self test',
+            teamId,
+            cardId: options.cardId || '',
+            weekStartInput: Object.prototype.hasOwnProperty.call(options, 'weekStartInput')
+                ? options.weekStartInput
+                : getResolvedWeekStart(new Date()),
+        });
+
+        return summarizeCardForDebug(resolvedCard);
     }
 
     function getCardSortMs(card) {
@@ -2774,9 +3003,15 @@
 
     window.timecardsApp = {
         buildTimeCardsPageUrl,
+        buildProjectedTimelineUpdate,
         fetchJoinedTeamsForSelfTest,
         resolveTeamForSelfTest,
         fetchTimeCardsPageForSelfTest,
+        fetchWeekTimeCardsForSelfTest,
+        resolveTimeCardActionResponseForSelfTest,
+        getPersistedTimeCardCacheSnapshotForSelfTest,
+        probeTimeCardCombinedWeekQuerySupport,
+        probeTimeCardDocumentedFilterSupport,
         probeTimeCardLastModifiedFilterSupport,
         probeTimeCardLastModifiedOrderBySupport,
     };
