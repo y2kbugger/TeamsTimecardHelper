@@ -1,8 +1,3 @@
-/**
- * Teams Timecards — app.js
- * Main app shell: team selection, timecards, editing, drag/resize.
- */
-
 import * as auth from './auth.js';
 import { $, escHtml, toast, showError } from './ui.js';
 
@@ -32,7 +27,7 @@ let liveClockTimerId = null;
 let backgroundRefreshTimerId = null;
 const timeCardCache = createTeamCacheState();
 let editTarget = null;
-let confirmCallback = null;
+let confirmResolve = null;
 
 const appEl = $('app');
 const userInfo = $('user-info');
@@ -46,11 +41,8 @@ const btnWeekNext = $('btn-week-next');
 const weekPicker = $('week-picker');
 const weekRangeLabel = $('week-range-label');
 const currentWeekTotal = $('current-week-total');
-const stateBadge = $('current-state-badge');
-const btnClockIn = $('btn-clock-in');
-const btnClockOut = $('btn-clock-out');
-const btnStartBreak = $('btn-start-break');
-const btnEndBreak = $('btn-end-break');
+const btnClock = $('btn-clock');
+const btnBreak = $('btn-break');
 const teamPickerPanel = $('team-picker-panel');
 const teamPickerMsg = $('team-picker-msg');
 const teamPickerSelect = $('team-picker-select');
@@ -65,10 +57,8 @@ function bindEvent(element, eventName, handler) {
 }
 
 bindEvent(btnSignout, 'click', handleSignOut);
-bindEvent(btnClockIn, 'click', () => doClockIn());
-bindEvent(btnClockOut, 'click', () => doClockOut());
-bindEvent(btnStartBreak, 'click', () => doStartBreak());
-bindEvent(btnEndBreak, 'click', () => doEndBreak());
+bindEvent(btnClock, 'click', onClockClick);
+bindEvent(btnBreak, 'click', onBreakClick);
 bindEvent(btnChangeTeam, 'click', () => showTeamPicker('Choose a different team. Your selection is saved in your browser.'));
 bindEvent(btnTeamSave, 'click', saveSelectedTeam);
 bindEvent(btnWeekPrev, 'click', () => shiftSelectedWeek(-7));
@@ -107,13 +97,10 @@ async function handleSignOut() {
     localStorage.removeItem(SESSION_KEY_SELECTED_TEAM_ID);
     localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
     sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
-    updateDocumentTitle();
+    document.title = 'Teams Timecards';
     await auth.signOut();
 }
 
-// ─────────────────────────────────────────────
-// Teams
-// ─────────────────────────────────────────────
 function showStatusPanel(message, tone = 'default') {
     updateDocumentTitle();
     teamPickerPanel.style.display = 'none';
@@ -125,7 +112,6 @@ function showStatusPanel(message, tone = 'default') {
     weekNav.style.display = 'none';
     currentWeekTotal.style.display = 'none';
     toolbarActions.style.display = 'none';
-    stateBadge.style.display = 'none';
     btnChangeTeam.style.display = 'none';
 }
 
@@ -152,7 +138,6 @@ function showTeamPicker(message) {
     weekNav.style.display = 'none';
     currentWeekTotal.style.display = 'none';
     toolbarActions.style.display = 'none';
-    stateBadge.style.display = 'none';
     btnChangeTeam.style.display = 'none';
     tcLoading.style.display = 'none';
     weeksContainer.style.display = 'none';
@@ -227,7 +212,6 @@ async function selectTeam(team) {
     localStorage.setItem(SESSION_KEY_SELECTED_TEAM_ID, team.id);
     toolbarTitle.textContent = team.displayName;
     toolbarActions.style.display = 'none';
-    stateBadge.style.display = 'none';
     btnChangeTeam.style.display = 'inline-flex';
     weekNav.style.display = 'flex';
     teamPickerPanel.style.display = 'none';
@@ -238,9 +222,6 @@ async function selectTeam(team) {
     syncBackgroundRefreshLoop();
 }
 
-// ─────────────────────────────────────────────
-// TimeCards loading & cache
-// ─────────────────────────────────────────────
 async function loadTimeCards() {
     if (!selectedTeam) return;
     teamPickerPanel.style.display = 'none';
@@ -297,7 +278,6 @@ async function refreshTimeCards({ forceSpinner = false } = {}) {
     const request = (async () => {
         const snapshot = await fetchWeekTimeCards(teamId, targetWeekStart);
         setCachedWeek(cache, targetWeekStart, snapshot.cards, snapshot.fetchedAt);
-        maybeWarnAboutPagedWeek(cache, targetWeekKey, snapshot.pageCount);
         const knownActiveCardWasReturned = Boolean(
             cache.activeCard && snapshot.cards.some(card => card.id === cache.activeCard.id),
         );
@@ -329,7 +309,6 @@ function createTeamCacheState(teamId = '') {
         currentWeekFetchedAt: 0,
         pendingWeekKey: '',
         pendingWeekPromise: null,
-        warnedMultiPageWeekKey: '',
     };
 }
 
@@ -339,14 +318,7 @@ export function getTeamCache(teamId) {
 }
 
 function resetTeamCache(cache, teamId = cache.teamId) {
-    cache.teamId = teamId;
-    cache.activeCard = null;
-    cache.currentWeekKey = '';
-    cache.currentWeekCards = [];
-    cache.currentWeekFetchedAt = 0;
-    cache.pendingWeekKey = '';
-    cache.pendingWeekPromise = null;
-    cache.warnedMultiPageWeekKey = '';
+    Object.assign(cache, createTeamCacheState(teamId));
 }
 
 export function buildTimeCardsPageUrl(teamId, { pageSize = TIMECARD_PAGE_SIZE } = {}) {
@@ -386,17 +358,6 @@ function setCachedWeek(cache, weekStartInput, cards, fetchedAt = Date.now()) {
     cache.currentWeekCards = dedupeCardsById(cards);
     cache.currentWeekFetchedAt = fetchedAt;
     return cache.currentWeekCards;
-}
-
-function maybeWarnAboutPagedWeek(cache, weekKey, pageCount) {
-    if (pageCount > 1) {
-        if (cache.warnedMultiPageWeekKey !== weekKey) {
-            toast(`This week required ${pageCount} pages to load all timecards.`, 'warn');
-            cache.warnedMultiPageWeekKey = weekKey;
-        }
-        return;
-    }
-    if (cache.warnedMultiPageWeekKey === weekKey) cache.warnedMultiPageWeekKey = '';
 }
 
 function isOpenCardState(card) {
@@ -479,10 +440,10 @@ function deriveCardState(card) {
 }
 
 function cloneCardBreaks(breaks) {
-    return (breaks || []).map(item => ({
-        breakId: item.breakId,
-        start: item.start ? { dateTime: item.start.dateTime, notes: item.start.notes } : null,
-        end: item.end ? { dateTime: item.end.dateTime, notes: item.end.notes } : null,
+    return (breaks || []).map(b => ({
+        breakId: b.breakId,
+        start: b.start ? { ...b.start } : null,
+        end: b.end ? { ...b.end } : null,
     }));
 }
 
@@ -514,22 +475,17 @@ function buildUpdatedCard(card, changes = {}) {
 }
 
 function buildTimeCardUpdateBody(card) {
+    const ev = e => e ? { dateTime: e.dateTime, atApprovedLocation: e.atApprovedLocation ?? false } : undefined;
     const body = {
-        clockInEvent: card.clockIn ? {
-            dateTime: card.clockIn.dateTime,
-            atApprovedLocation: card.clockIn.atApprovedLocation ?? false,
-        } : undefined,
-        clockOutEvent: card.clockOut ? {
-            dateTime: card.clockOut.dateTime,
-            atApprovedLocation: card.clockOut.atApprovedLocation ?? false,
-        } : undefined,
+        clockInEvent: ev(card.clockIn),
+        clockOutEvent: ev(card.clockOut),
         breaks: card.breaks.map(b => ({
             breakId: b.breakId,
             start: b.start ? { dateTime: b.start.dateTime } : undefined,
             end: b.end ? { dateTime: b.end.dateTime } : undefined,
             notes: { contentType: 'text', content: '' },
         })),
-        notes: card.notes ? { contentType: card.notes.contentType, content: card.notes.content } : undefined,
+        notes: card.notes ? { ...card.notes } : undefined,
     };
     if (!body.clockOutEvent) delete body.clockOutEvent;
     if (!body.notes) delete body.notes;
@@ -601,7 +557,6 @@ async function resolveTimeCardActionResponse(response, { actionLabel, teamId, ca
         const snapshot = await fetchWeekTimeCards(teamId, weekStartInput);
         const cache = getTeamCache(teamId);
         setCachedWeek(cache, weekStartInput, snapshot.cards, snapshot.fetchedAt);
-        maybeWarnAboutPagedWeek(cache, snapshot.weekKey, snapshot.pageCount);
         cache.activeCard = snapshot.activeCard || null;
         if (snapshot.activeCard?.id) return snapshot.activeCard;
     }
@@ -675,9 +630,6 @@ function getCardAnchorDateTime(card) {
     return card?.clockIn?.dateTime || card?.clockInEvent?.dateTime || card?.createdDateTime || null;
 }
 
-// ─────────────────────────────────────────────
-// Render weeks + cards
-// ─────────────────────────────────────────────
 function renderWeeks() {
     tcLoading.style.display = 'none';
     weeksContainer.innerHTML = '';
@@ -880,40 +832,20 @@ function makeResizeHandle(edge) {
     return h;
 }
 
-// ─────────────────────────────────────────────
-// interact.js timeline drag / resize
-// ─────────────────────────────────────────────
 function attachTimelineInteractions() {
     if (typeof interact === 'undefined') return;
     interact('.tc-block').unset();
     interact('.break-overlay').unset();
 
-    interact('.tc-block')
-        .draggable({
-            axis: 'x',
-            ignoreFrom: '.resize-handle, [data-end-ms=""]',
-            listeners: { start: markInteractionActive, move: onTimelineDragMove, end: onTimelineEnd },
-            inertia: false,
-        })
-        .resizable({
-            edges: { left: '.resize-handle[data-edge="left"]', right: '.resize-handle[data-edge="right"]' },
-            axis: 'x',
-            listeners: { start: markInteractionActive, move: onTimelineResizeMove, end: onTimelineEnd },
-            inertia: false,
-        });
-
-    interact('.break-overlay')
-        .draggable({
-            axis: 'x',
-            listeners: { start: markInteractionActive, move: onBreakDragMove, end: onBreakEnd },
-            inertia: false,
-        })
-        .resizable({
-            edges: { left: '.resize-handle[data-edge="left"]', right: '.resize-handle[data-edge="right"]' },
-            axis: 'x',
-            listeners: { start: markInteractionActive, move: onBreakResizeMove, end: onBreakEnd },
-            inertia: false,
-        });
+    const edges = { left: '.resize-handle[data-edge="left"]', right: '.resize-handle[data-edge="right"]' };
+    interact('.tc-block').resizable({
+        edges, axis: 'x', inertia: false,
+        listeners: { start: markInteractionActive, move: onTimelineResizeMove, end: onTimelineEnd },
+    });
+    interact('.break-overlay').resizable({
+        edges, axis: 'x', inertia: false,
+        listeners: { start: markInteractionActive, move: onBreakResizeMove, end: onBreakEnd },
+    });
 }
 
 function markInteractionActive(event) {
@@ -991,22 +923,6 @@ function setTimelinePending(el, newStartMs, newEndMs, isOpenCard, event) {
     showDragTooltip(event.clientX, event.clientY, `${fmtTime(new Date(newStartMs))} → ${fmtTime(new Date(newEndMs))}`);
 }
 
-function onTimelineDragMove(event) {
-    const el = event.target;
-    if (isOpenTimelineBlock(el)) return;
-
-    const axisW = getAxisWidth(el);
-    const totalSpanMs = parseInt(el.dataset.totalSpanMs, 10);
-    const weekStartMs = parseInt(el.dataset.weekStartMs, 10);
-    const deltaPct = (event.dx / axisW) * 100;
-    const newLeft = Math.max(0, Math.min(parseFloat(el.style.left) + deltaPct, 100 - parseFloat(el.style.width)));
-    el.style.left = newLeft + '%';
-
-    const newStartMs = weekStartMs + msFromPct(newLeft, totalSpanMs);
-    const newEndMs = newStartMs + msFromPct(parseFloat(el.style.width), totalSpanMs);
-    setTimelinePending(el, newStartMs, newEndMs, false, event);
-}
-
 function onTimelineResizeMove(event) {
     const el = event.target;
     const isOpenCard = isOpenTimelineBlock(el);
@@ -1054,25 +970,6 @@ async function onTimelineEnd(event) {
     } finally {
         clearInteractionActive(el);
     }
-}
-
-function onBreakDragMove(event) {
-    const el = event.target;
-    const axisW = getAxisWidth(el);
-    const deltaPct = (event.dx / axisW) * 100;
-    const widthPct = parseFloat(el.style.width);
-    const bounds = getRangeBoundsPct(el);
-    const newLeft = clamp(parseFloat(el.style.left) + deltaPct, bounds.minLeftPct, bounds.maxRightPct - widthPct);
-    const totalSpanMs = Number(el.dataset.totalSpanMs);
-    const weekStartMs = Number(el.dataset.weekStartMs);
-    const newStartMs = weekStartMs + msFromPct(newLeft, totalSpanMs);
-    const newEndMs = newStartMs + msFromPct(widthPct, totalSpanMs);
-
-    el.style.left = `${newLeft}%`;
-    showDragTooltip(event.clientX, event.clientY, `${fmtTime(new Date(newStartMs))} → ${fmtTime(new Date(newEndMs))}`);
-    const snapped = getOverlayStartEndMs(el);
-    el.dataset.pendingStartMs = String(snapped.startMs);
-    el.dataset.pendingEndMs = String(snapped.endMs);
 }
 
 function onBreakResizeMove(event) {
@@ -1143,9 +1040,6 @@ function hideDragTooltip() {
     dragTooltip.style.display = 'none';
 }
 
-// ─────────────────────────────────────────────
-// Card list rendering
-// ─────────────────────────────────────────────
 function renderDayCardList(cards, listEl) {
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -1223,40 +1117,124 @@ function buildBreaksList(card) {
     return wrapper;
 }
 
-// ─────────────────────────────────────────────
-// Toolbar state
-// ─────────────────────────────────────────────
-function updateToolbarState() {
-    const state = activeTimeCard?.state || 'clockedOut';
-    const showClockIn = state === 'clockedOut';
-    const showClockOut = state === 'clockedIn' || state === 'onBreak';
-    const showStartBreak = state === 'clockedIn';
-    const showEndBreak = state === 'onBreak';
+const TOOLBAR_ACTIONS = {
+    clockIn: {
+        button: btnClock,
+        endpoint: () => '/clockIn',
+        label: 'Clock In',
+        successMsg: 'Clocked in',
+        useActive: false,
+        weekStartInput: () => getResolvedWeekStart(new Date()),
+    },
+    clockOut: {
+        button: btnClock,
+        endpoint: id => `/${id}/clockOut`,
+        label: 'Clock Out',
+        successMsg: 'Clocked out',
+        useActive: true,
+    },
+    startBreak: {
+        button: btnBreak,
+        endpoint: id => `/${id}/startBreak`,
+        label: 'Start Break',
+        successMsg: 'Break started',
+        useActive: true,
+    },
+    endBreak: {
+        button: btnBreak,
+        endpoint: id => `/${id}/endBreak`,
+        label: 'End Break',
+        successMsg: 'Break ended',
+        useActive: true,
+    },
+};
 
-    btnClockIn.disabled = false;
-    btnClockOut.disabled = false;
-    btnStartBreak.disabled = false;
-    btnEndBreak.disabled = false;
-
-    btnClockIn.style.display = showClockIn ? 'inline-flex' : 'none';
-    btnClockOut.style.display = showClockOut ? 'inline-flex' : 'none';
-    btnStartBreak.style.display = showStartBreak ? 'inline-flex' : 'none';
-    btnEndBreak.style.display = showEndBreak ? 'inline-flex' : 'none';
-
-    toolbarActions.style.display = selectedTeam && (showClockIn || showClockOut || showStartBreak || showEndBreak) ? 'flex' : 'none';
-    stateBadge.style.display = selectedTeam ? 'inline-block' : 'none';
-
-    stateBadge.textContent = state === 'clockedIn' ? '● Clocked In'
-        : state === 'onBreak' ? '◐ On Break'
-            : '○ Clocked Out';
-    stateBadge.className = state === 'clockedIn' ? 'chip chip-in'
-        : state === 'onBreak' ? 'chip chip-break'
-            : 'chip chip-out';
+function setToolbarButton(button, {
+    label,
+    className,
+    action = '',
+    disabled = false,
+    display = 'inline-flex',
+    title = '',
+} = {}) {
+    if (!button) return;
+    button.textContent = label || '';
+    button.className = className || 'btn';
+    button.style.display = display;
+    button.disabled = disabled;
+    button.dataset.action = action;
+    button.title = title;
 }
 
-// ─────────────────────────────────────────────
-// Timecard actions (clockIn/Out, startBreak/endBreak)
-// ─────────────────────────────────────────────
+function updateToolbarState() {
+    const state = activeTimeCard?.state || 'clockedOut';
+    if (!selectedTeam) {
+        toolbarActions.style.display = 'none';
+        return;
+    }
+
+    if (state === 'clockedOut') {
+        setToolbarButton(btnClock, {
+            label: 'Clock In',
+            className: 'btn btn-success btn-state-idle',
+            action: 'clockIn',
+            title: 'Start a new timecard',
+        });
+        setToolbarButton(btnBreak, { display: 'none', action: '' });
+    } else if (state === 'clockedIn') {
+        setToolbarButton(btnClock, {
+            label: 'Clock Out',
+            className: 'btn btn-danger btn-state-working',
+            action: 'clockOut',
+            title: 'End the active timecard',
+        });
+        setToolbarButton(btnBreak, {
+            label: 'Start Break',
+            className: 'btn btn-warn',
+            action: 'startBreak',
+            title: 'Start a break on the active timecard',
+        });
+    } else {
+        setToolbarButton(btnClock, {
+            label: 'On Break',
+            className: 'btn btn-state-break',
+            action: '',
+            disabled: true,
+            title: 'End the current break before clocking out',
+        });
+        setToolbarButton(btnBreak, {
+            label: 'End Break',
+            className: 'btn btn-success',
+            action: 'endBreak',
+            title: 'End the current break',
+        });
+    }
+
+    toolbarActions.style.display = 'flex';
+}
+
+function onClockClick() {
+    return runToolbarAction(btnClock);
+}
+
+function onBreakClick() {
+    return runToolbarAction(btnBreak);
+}
+
+async function runToolbarAction(button) {
+    const actionKey = button?.dataset.action || '';
+    if (!actionKey || !TOOLBAR_ACTIONS[actionKey]) return;
+    const action = TOOLBAR_ACTIONS[actionKey];
+    return doTimeCardAction({
+        btn: action.button,
+        endpoint: action.endpoint,
+        label: action.label,
+        successMsg: action.successMsg,
+        useActive: action.useActive,
+        weekStartInput: action.weekStartInput ? action.weekStartInput() : null,
+    });
+}
+
 async function doTimeCardAction({ btn, endpoint, label, successMsg, useActive, weekStartInput = null }) {
     if (useActive && !activeTimeCard) return;
     if (!selectedTeam) return;
@@ -1279,30 +1257,21 @@ async function doTimeCardAction({ btn, endpoint, label, successMsg, useActive, w
     }
 }
 
-const doClockIn = () => doTimeCardAction({
-    btn: btnClockIn, endpoint: () => '/clockIn', label: 'Clock in', successMsg: 'Clocked in',
-    useActive: false, weekStartInput: getResolvedWeekStart(new Date()),
-});
-const doClockOut = () => doTimeCardAction({
-    btn: btnClockOut, endpoint: id => `/${id}/clockOut`, label: 'Clock out', successMsg: 'Clocked out', useActive: true,
-});
-const doStartBreak = () => doTimeCardAction({
-    btn: btnStartBreak, endpoint: id => `/${id}/startBreak`, label: 'Start break', successMsg: 'Break started', useActive: true,
-});
-const doEndBreak = () => doTimeCardAction({
-    btn: btnEndBreak, endpoint: id => `/${id}/endBreak`, label: 'End break', successMsg: 'Break ended', useActive: true,
-});
-
-// ─────────────────────────────────────────────
-// Delete timecard / break
-// ─────────────────────────────────────────────
-function confirmDeleteCard(card) {
-    const inStr = card.clockIn ? fmtDateTime(new Date(card.clockIn.dateTime)) : 'unknown';
-    $('confirm-title').textContent = 'Delete Timecard';
-    $('confirm-msg').textContent = `Are you sure you want to permanently delete the timecard starting ${inStr}? This cannot be undone.`;
-    $('confirm-beta-warn').style.display = 'block';
+function askConfirm({ title, message, beta = false }) {
+    $('confirm-title').textContent = title;
+    $('confirm-msg').textContent = message;
+    $('confirm-beta-warn').style.display = beta ? 'block' : 'none';
     $('confirm-modal').classList.remove('hidden');
-    confirmCallback = async ok => { if (ok) await deleteCard(card); };
+    return new Promise(r => { confirmResolve = r; });
+}
+
+async function confirmDeleteCard(card) {
+    const inStr = card.clockIn ? fmtDateTime(new Date(card.clockIn.dateTime)) : 'unknown';
+    if (await askConfirm({
+        title: 'Delete Timecard',
+        message: `Are you sure you want to permanently delete the timecard starting ${inStr}? This cannot be undone.`,
+        beta: true,
+    })) await deleteCard(card);
 }
 
 async function deleteCard(card) {
@@ -1315,17 +1284,15 @@ async function deleteCard(card) {
     }
 }
 
-function confirmDeleteBreak(cardId, breakId) {
+async function confirmDeleteBreak(cardId, breakId) {
     const card = allTimeCards.find(item => item.id === cardId);
     const currentBreak = card?.breaks.find(item => item.breakId === breakId);
     if (!card || !currentBreak || !breakId) return;
-
     const breakStart = currentBreak.start?.dateTime ? fmtDateTime(new Date(currentBreak.start.dateTime)) : 'this break';
-    $('confirm-title').textContent = 'Delete Break';
-    $('confirm-msg').textContent = `Delete the break starting ${breakStart}? This cannot be undone.`;
-    $('confirm-beta-warn').style.display = 'none';
-    $('confirm-modal').classList.remove('hidden');
-    confirmCallback = async ok => { if (ok) await deleteBreak(card, breakId); };
+    if (await askConfirm({
+        title: 'Delete Break',
+        message: `Delete the break starting ${breakStart}? This cannot be undone.`,
+    })) await deleteBreak(card, breakId);
 }
 
 async function deleteBreak(card, breakId) {
@@ -1345,9 +1312,6 @@ async function deleteBreak(card, breakId) {
     }
 }
 
-// ─────────────────────────────────────────────
-// Edit timecard modal
-// ─────────────────────────────────────────────
 function openEditModal(card) {
     editTarget = card;
     $('edit-clock-in').value = card.clockIn ? toLocalDatetimeInput(new Date(card.clockIn.dateTime)) : '';
@@ -1507,9 +1471,6 @@ async function saveEditModal() {
     }
 }
 
-// ─────────────────────────────────────────────
-// Persist timeline drag/resize
-// ─────────────────────────────────────────────
 export function buildProjectedTimelineUpdate(card, newStart, newEnd) {
     const effectiveEnd = card?.clockOut ? newEnd : null;
     const updatedCard = buildUpdatedCard(card, { clockIn: newStart, clockOut: effectiveEnd });
@@ -1584,17 +1545,10 @@ async function persistBreakTimeUpdate(card, breakIndex, newStart, newEnd) {
 
 function closeConfirm(ok) {
     $('confirm-modal').classList.add('hidden');
-    $('confirm-beta-warn').style.display = 'none';
-    if (confirmCallback) {
-        const cb = confirmCallback;
-        confirmCallback = null;
-        cb(ok);
-    }
+    confirmResolve?.(ok);
+    confirmResolve = null;
 }
 
-// ─────────────────────────────────────────────
-// Helpers — totals, live clock, formatting
-// ─────────────────────────────────────────────
 function updateCurrentWeekTotal(cards) {
     const totalMs = cards.reduce((sum, card) => sum + workedMs(card), 0);
     const titleTotal = formatDurationHms(totalMs);

@@ -1,0 +1,1 @@
+- Static assets are cache-busted with query strings in index.html, login.html, and test.html. After changing common.css, timecards.css, or app.js, bump the version suffix or the browser may keep using stale files.
