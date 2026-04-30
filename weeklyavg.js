@@ -82,7 +82,7 @@ function buildFeatureUi() {
                     <p class="weekly-avg-headline">Weekly average</p>
                     <p class="weekly-avg-meta"></p>
                 </div>
-                <p class="weekly-avg-note">Expected time is split evenly across Monday-Friday from the chosen start date. Saturday and Sunday always count as 00:00:00. Difference is actual cumulative minus expected cumulative, so negative means behind.</p>
+                <p class="weekly-avg-note">Expected time is split evenly across Monday-Friday from the chosen start date. Saturday and Sunday always count as 00:00:00. Difference columns are actual minus expected, so negative means behind.</p>
             </div>
             <div class="weekly-avg-toolbar">
                 <label class="weekly-avg-field">
@@ -104,9 +104,8 @@ function buildFeatureUi() {
                             <th>Expected/day</th>
                             <th>Expected week</th>
                             <th>Actual week</th>
-                            <th>Expected cumulative</th>
-                            <th>Actual cumulative</th>
-                            <th>Difference</th>
+                            <th>Weekly</th>
+                            <th>Cum.</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -357,6 +356,7 @@ function buildWeeklyModel(cards, settings, currentWeekStart, now) {
             expectedDailyMs: settings.dailyTargetMs,
             expectedWeekMs,
             actualWeekMs,
+            weeklyDifferenceMs: actualWeekMs - expectedWeekMs,
             expectedCumulativeMs,
             actualCumulativeMs,
             differenceMs: actualCumulativeMs - expectedCumulativeMs,
@@ -445,11 +445,8 @@ function describeDifference(differenceMs) {
 
 function buildRow(row) {
     const tr = document.createElement('tr');
-    const diffClass = row.differenceMs < -999
-        ? 'weekly-avg-diff-negative'
-        : row.differenceMs > 999
-            ? 'weekly-avg-diff-positive'
-            : 'weekly-avg-diff-neutral';
+    const weeklyDiffClass = getDifferenceClass(row.weeklyDifferenceMs);
+    const cumulativeDiffClass = getDifferenceClass(row.differenceMs);
     const weekState = row.isCurrentWeek ? 'Current week' : row.isPartialWeek ? 'Partial week' : '';
     tr.className = row.isCurrentWeek ? 'weekly-avg-row-current' : '';
     tr.innerHTML = `
@@ -460,11 +457,18 @@ function buildRow(row) {
         <td class="weekly-avg-mono">${formatDurationHms(row.expectedDailyMs)}</td>
         <td class="weekly-avg-mono">${formatDurationHms(row.expectedWeekMs)}</td>
         <td class="weekly-avg-mono">${formatDurationHms(row.actualWeekMs)}</td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.expectedCumulativeMs)}</td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.actualCumulativeMs)}</td>
-        <td class="weekly-avg-mono ${diffClass}">${formatSignedDuration(row.differenceMs)}</td>
+        <td class="weekly-avg-mono ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
+        <td class="weekly-avg-mono ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
     `;
     return tr;
+}
+
+function getDifferenceClass(durationMs) {
+    return durationMs < -999
+        ? 'weekly-avg-diff-negative'
+        : durationMs > 999
+            ? 'weekly-avg-diff-positive'
+            : 'weekly-avg-diff-neutral';
 }
 
 function formatSignedDuration(durationMs) {
