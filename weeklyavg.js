@@ -189,6 +189,12 @@ function startOfDay(date) {
     return value;
 }
 
+function addCalendarDays(date, days) {
+    const value = startOfDay(date);
+    value.setDate(value.getDate() + days);
+    return value;
+}
+
 function parseDateInput(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
     const parsed = new Date(`${value}T00:00:00`);
@@ -325,15 +331,16 @@ function buildWeeklyModel(cards, settings, currentWeekStart, now) {
     const rows = [];
     let expectedCumulativeMs = 0;
     let actualCumulativeMs = 0;
+    const firstWeekStart = getWeekRange(settings.startDate).weekStart;
 
-    for (let weekMs = getWeekRange(settings.startDate).weekStart.getTime(); weekMs <= currentWeekStart.getTime(); weekMs += (7 * DAY_MS)) {
-        const weekStart = new Date(weekMs);
-        const weekEnd = new Date(weekMs + (6 * DAY_MS));
+    for (let weekStart = new Date(firstWeekStart); weekStart.getTime() <= currentWeekStart.getTime(); weekStart = addCalendarDays(weekStart, 7)) {
+        const weekStartMs = weekStart.getTime();
+        const weekEnd = addCalendarDays(weekStart, 6);
         let expectedWeekMs = 0;
         let actualWeekMs = 0;
 
         for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-            const day = new Date(weekMs + (dayIndex * DAY_MS));
+            const day = addCalendarDays(weekStart, dayIndex);
             const dayMs = day.getTime();
             const dayKey = formatDateInputValue(day);
             const inScope = dayMs >= rangeStartMs && dayMs <= todayStart;
