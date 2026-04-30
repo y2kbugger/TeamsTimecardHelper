@@ -1056,7 +1056,7 @@ function buildCardRow(card) {
     <div class="tc-row-actions">
             ${showExtendToNow ? `<button class="btn btn-secondary" data-action="extend-now" data-card-id="${card.id}">Extend to now</button>` : ''}
       <button class="btn btn-secondary" data-action="edit" data-card-id="${card.id}">Edit</button>
-      <button class="btn btn-danger" data-action="delete" data-card-id="${card.id}">Delete</button>
+            <button class="btn btn-danger btn-icon-only" data-action="delete" data-card-id="${card.id}" title="Delete timecard" aria-label="Delete timecard">&#x1F5D1;</button>
     </div>
   `;
 
@@ -1086,7 +1086,7 @@ function buildBreaksList(card) {
         brow.innerHTML = `
             <span class="break-label">↳ Break ${idx + 1}:</span>
       <span class="break-row-detail">${bStart} → ${bEnd} ${dur ? `(${dur})` : ''}</span>
-      ${b.breakId ? `<button class="btn btn-danger btn-compact" data-action="delete-break" data-card-id="${card.id}" data-break-id="${b.breakId}">Delete</button>` : ''}
+            ${b.breakId ? `<button class="btn btn-danger btn-compact btn-icon-only" data-action="delete-break" data-card-id="${card.id}" data-break-id="${b.breakId}" title="Delete break" aria-label="Delete break">&#x1F5D1;</button>` : ''}
     `;
         const deleteBtn = brow.querySelector('[data-action="delete-break"]');
         if (deleteBtn) {

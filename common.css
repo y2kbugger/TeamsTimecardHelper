@@ -1,11 +1,12 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242736;--border:#2e3246;--accent:#5b6af5;--text:#e8eaf6;--text2:#9499b8;--danger:#e05c6a;--warn:#f0a843;--success:#4cba72}
 body{min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column}
-header{height:56px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+header{min-height:56px;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
 header h1{flex:1;font-size:1.05rem}
 #auth-area,#test-actions,.modal-subheader,.modal-actions{display:flex;align-items:center;gap:8px}
-#auth-area{gap:10px}
+#auth-area{gap:10px;flex-wrap:wrap;justify-content:flex-end}
 #user-info,.form-group label,.panel-empty,#test-auth-status,.test-meta,.test-summary{color:var(--text2)}
+#user-info{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btn,input,textarea,select{font:inherit}
 .btn{padding:6px 14px;border:0;border-radius:6px;cursor:pointer}
 .btn-primary{background:var(--accent);color:#fff}
