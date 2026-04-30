@@ -11,6 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CACHE_STALE_MS = 45 * 1000;
 const BACKGROUND_REFRESH_MS = 30 * 1000;
 const TIMECARD_PAGE_SIZE = 250;
+const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260430c';
 
 const graphFetch = auth.graphFetch;
 const graphFetchBeta = auth.graphFetchBeta;
@@ -28,6 +29,7 @@ let backgroundRefreshTimerId = null;
 const timeCardCache = createTeamCacheState();
 let editTarget = null;
 let confirmResolve = null;
+let weeklyAverageFeatureInitPromise = null;
 
 const appEl = $('app');
 const userInfo = $('user-info');
@@ -51,6 +53,31 @@ const noTeamMsg = $('no-team-msg');
 const tcLoading = $('timecards-loading');
 const weeksContainer = $('weeks-container');
 const dragTooltip = $('drag-tooltip');
+
+async function ensureWeeklyAverageFeature() {
+    if (document.body.dataset.page !== 'app') return;
+    if (!weeklyAverageFeatureInitPromise) {
+        weeklyAverageFeatureInitPromise = import(WEEKLY_AVG_MODULE)
+            .then(module => module.initWeeklyAverageFeature())
+            .catch(error => {
+                showError('Failed to load weekly average feature: ' + error.message);
+                throw error;
+            });
+    }
+    return weeklyAverageFeatureInitPromise;
+}
+
+export function getSelectedTeam() {
+    return selectedTeam ? { ...selectedTeam } : null;
+}
+
+export function getCurrentAppState() {
+    return {
+        team: getSelectedTeam(),
+        selectedWeekStart: formatDateInputValue(getResolvedWeekStart(selectedWeekStart)),
+        dataVersion: selectedTeam ? getTeamCache(selectedTeam.id).currentWeekFetchedAt : 0,
+    };
+}
 
 function bindEvent(element, eventName, handler) {
     if (element) element.addEventListener(eventName, handler);
@@ -82,6 +109,7 @@ async function boot() {
     userInfo.textContent = account?.name || account?.username || '';
     btnSignout.style.display = 'inline-flex';
     appEl.style.display = 'flex';
+    await ensureWeeklyAverageFeature();
     await loadTeams();
 }
 
@@ -392,6 +420,23 @@ function buildSelectedWeekClockInWindowFilter(weekStartInput) {
     return `clockInEvent/dateTime ge ${weekStart.toISOString()} and clockInEvent/dateTime le ${weekEndInclusive.toISOString()}`;
 }
 
+function resolveRangeBoundary(rangeInput, endOfDay = false) {
+    if (rangeInput instanceof Date && !Number.isNaN(rangeInput.getTime())) return new Date(rangeInput);
+    if (typeof rangeInput === 'string' && rangeInput) {
+        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(rangeInput)
+            ? new Date(`${rangeInput}T${endOfDay ? '23:59:59.999' : '00:00:00'}`)
+            : new Date(rangeInput);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    throw new Error('Invalid timecard range boundary.');
+}
+
+function buildClockInWindowFilter(rangeStartInput, rangeEndInput) {
+    const rangeStart = resolveRangeBoundary(rangeStartInput);
+    const rangeEnd = resolveRangeBoundary(rangeEndInput, true);
+    return `clockInEvent/dateTime ge ${rangeStart.toISOString()} and clockInEvent/dateTime le ${rangeEnd.toISOString()}`;
+}
+
 export async function fetchWeekTimeCards(teamId, weekStartInput) {
     const filterExpr = buildSelectedWeekClockInWindowFilter(weekStartInput);
     let nextUrl = `/teams/${teamId}/schedule/timeCards?$top=${TIMECARD_PAGE_SIZE}&$filter=${encodeURIComponent(filterExpr)}`;
@@ -419,6 +464,29 @@ export async function fetchWeekTimeCards(teamId, weekStartInput) {
         fetchedAt: Date.now(),
         activeCard: activeCards.find(card => isOpenCardState(card)) || null,
         cards: filteredCards,
+        pageCount,
+    };
+}
+
+export async function fetchTimeCardsForDateRange(teamId, rangeStartInput, rangeEndInput) {
+    const filterExpr = buildClockInWindowFilter(rangeStartInput, rangeEndInput);
+    let nextUrl = `/teams/${teamId}/schedule/timeCards?$top=${TIMECARD_PAGE_SIZE}&$filter=${encodeURIComponent(filterExpr)}`;
+    let pageCount = 0;
+    const byId = new Map();
+
+    while (nextUrl) {
+        const data = await graphFetch(nextUrl);
+        (data?.value || []).forEach(raw => {
+            const card = normalizeCard(raw);
+            byId.set(card.id, card);
+        });
+        pageCount += 1;
+        nextUrl = data?.['@odata.nextLink'] || null;
+    }
+
+    return {
+        cards: dedupeCardsById(Array.from(byId.values())),
+        fetchedAt: Date.now(),
         pageCount,
     };
 }
@@ -1682,7 +1750,7 @@ export function formatDateInputValue(date) {
     return `${year}-${month}-${day}`;
 }
 
-function workedMs(card) {
+export function workedMs(card) {
     if (!card.clockIn) return 0;
     const start = new Date(card.clockIn.dateTime).getTime();
     const end = card.clockOut ? new Date(card.clockOut.dateTime).getTime() : Date.now();
@@ -1695,7 +1763,7 @@ function workedMs(card) {
     return Math.max(0, end - start - breakMs);
 }
 
-function formatDurationHms(durationMs) {
+export function formatDurationHms(durationMs) {
     const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
