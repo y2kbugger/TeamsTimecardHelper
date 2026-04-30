@@ -426,9 +426,7 @@ export async function fetchWeekTimeCards(teamId, weekStartInput) {
 function applyTimeCards(cards) {
     allTimeCards = filterCardsForWeek(cards, selectedWeekStart);
     activeTimeCard = selectedTeam ? (getTeamCache(selectedTeam.id).activeCard || null) : null;
-    if (highlightedCardId && !allTimeCards.some(card => card.id === highlightedCardId)) {
-        highlightedCardId = null;
-    }
+    if (highlightedCardId && !allTimeCards.some(card => card.id === highlightedCardId)) highlightedCardId = null;
     updateToolbarState();
     renderWeeks();
 }
@@ -717,11 +715,7 @@ function buildDaySection(dayGroup) {
             <span class="day-section-total">${formatDurationHms(totalMs)} worked</span>
         </div>
         <div class="day-timeline-row">
-            <div class="day-timeline-wrapper">
-                <div class="day-timeline-container">
-                    <div class="timeline-axis day-timeline-axis"></div>
-                </div>
-            </div>
+            <div class="day-timeline-container"></div>
         </div>
         <div class="card-list day-card-list"></div>
     `;
@@ -731,31 +725,25 @@ function buildDaySection(dayGroup) {
 }
 
 function renderDayTimeline(dayGroup, sectionEl) {
-    const axisEl = sectionEl.querySelector('.day-timeline-axis');
-    if (!axisEl) return;
-    axisEl.innerHTML = '';
+    const timelineEl = sectionEl.querySelector('.day-timeline-container');
+    if (!timelineEl) return;
+    timelineEl.innerHTML = '';
 
     const dayStartMs = dayGroup.dayStart.getTime();
     const dayEndMs = dayStartMs + 24 * 3600 * 1000;
     const totalSpanMs = dayEndMs - dayStartMs;
-    const tickInterval = 3600 * 1000;
+    const labelInterval = 2 * 3600 * 1000;
 
-    for (let t = dayStartMs; t <= dayEndMs; t += tickInterval) {
+    for (let t = dayStartMs + labelInterval; t < dayEndMs; t += labelInterval) {
         const pct = ((t - dayStartMs) / totalSpanMs) * 100;
         const d = new Date(t);
-        const tick = document.createElement('div');
-        tick.className = 'hour-tick';
-        tick.style.left = pct + '%';
-        axisEl.appendChild(tick);
-        if (d.getHours() % 2 === 0) {
-            const hl = document.createElement('div');
-            hl.className = 'hour-label';
-            hl.style.left = pct + '%';
-            hl.textContent = fmtHour(d);
-            axisEl.appendChild(hl);
-        }
+        const hl = document.createElement('div');
+        hl.className = 'hour-label';
+        hl.style.left = pct + '%';
+        hl.textContent = fmtHour(d);
+        timelineEl.appendChild(hl);
     }
-    appendTimelineBlocks(axisEl, dayGroup.cards, dayStartMs, dayEndMs, totalSpanMs);
+    appendTimelineBlocks(timelineEl, dayGroup.cards, dayStartMs, dayEndMs, totalSpanMs);
 }
 
 function appendTimelineBlocks(axisEl, cards, axisStartMs, axisEndMs, totalSpanMs) {
@@ -771,7 +759,7 @@ function appendTimelineBlocks(axisEl, cards, axisStartMs, axisEndMs, totalSpanMs
         const widthPct = ((clippedEndMs - clippedStartMs) / totalSpanMs) * 100;
 
         const tcBlock = document.createElement('div');
-        tcBlock.className = 'tc-block' + (card.id === activeTimeCard?.id ? ' active-card-block' : '');
+        tcBlock.className = 'tc-block';
         tcBlock.style.left = `${Math.max(0, leftPct)}%`;
         tcBlock.style.width = `${Math.max(0.1, widthPct)}%`;
         tcBlock.dataset.cardId = card.id;
@@ -872,7 +860,7 @@ function getActiveResizeEdge(el, event) {
 }
 
 function getAxisWidth(tcBlock) {
-    const axis = tcBlock.closest('.timeline-axis');
+    const axis = tcBlock.closest('.day-timeline-container');
     return axis ? axis.offsetWidth : 1;
 }
 
@@ -1054,16 +1042,13 @@ function renderDayCardList(cards, listEl) {
 
 function buildCardRow(card) {
     const row = document.createElement('div');
-    row.className = 'tc-row'
-        + (card.id === activeTimeCard?.id ? ' active-card' : '')
-        + (card.id === highlightedCardId ? ' link-highlighted' : '');
+    row.className = 'tc-row';
     row.dataset.cardId = card.id;
 
     const inDt = card.clockIn ? fmtDateTime(new Date(card.clockIn.dateTime)) : '—';
     const outDt = card.clockOut ? fmtDateTime(new Date(card.clockOut.dateTime)) : '—';
     const workedHms = formatDurationHms(workedMs(card));
     const showExtendToNow = card.id === latestVisibleCardId && Boolean(card.clockIn && card.clockOut);
-
     row.innerHTML = `
     <div class="tc-row-date">${card.clockIn ? fmtDate(new Date(card.clockIn.dateTime)) : '—'}</div>
         <div class="tc-row-time" data-field="clock-in"><span class="tc-row-time-value">${inDt}</span></div>
@@ -1075,17 +1060,15 @@ function buildCardRow(card) {
     </div>
   `;
 
-    row.addEventListener('click', () => setHighlightedCardId(card.id));
     row.querySelectorAll('[data-action]').forEach(btn => {
-        btn.addEventListener('click', e => {
-            e.stopPropagation();
-            const c = allTimeCards.find(x => x.id === btn.dataset.cardId);
-            if (!c) return;
-            if (btn.dataset.action === 'extend-now') extendCardToNow(c);
-            if (btn.dataset.action === 'edit') openEditModal(c);
-            if (btn.dataset.action === 'delete') confirmDeleteCard(c);
+        btn.addEventListener('click', event => {
+            event.stopPropagation();
+            if (btn.dataset.action === 'extend-now') void extendCardToNow(card);
+            if (btn.dataset.action === 'edit') openEditModal(card);
+            if (btn.dataset.action === 'delete') void confirmDeleteCard(card);
         });
     });
+    row.addEventListener('click', () => setHighlightedCardId(card.id));
     return row;
 }
 
@@ -1109,7 +1092,7 @@ function buildBreaksList(card) {
         if (deleteBtn) {
             deleteBtn.addEventListener('click', event => {
                 event.stopPropagation();
-                confirmDeleteBreak(card.id, b.breakId);
+                void confirmDeleteBreak(card.id, b.breakId);
             });
         }
         wrapper.appendChild(brow);
@@ -1504,7 +1487,6 @@ async function extendCardToNow(card) {
         toast('Card already reaches now', 'info');
         return;
     }
-    setHighlightedCardId(card.id);
     await persistCardTimeUpdate(card, new Date(card.clockIn.dateTime), new Date(targetEndMs));
 }
 

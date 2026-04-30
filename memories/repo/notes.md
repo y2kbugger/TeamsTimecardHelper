@@ -1,1 +1,2 @@
 - Static assets are cache-busted with query strings in index.html, login.html, and test.html. After changing common.css, timecards.css, or app.js, bump the version suffix or the browser may keep using stale files.
+- Toolbar state now lives in two buttons: `#btn-clock` and `#btn-break`. The separate state badge is removed, and when the user is on break the clock button is disabled and labeled `On Break` until the break is ended.
