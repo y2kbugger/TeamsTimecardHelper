@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teams Timecards Sign In</title>
+  <link rel="stylesheet" href="common.css?v=20260430c" />
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2/lib/msal-browser.min.js"></script>
+  <script type="module" src="auth.js?v=20260429m"></script>
+</head>
+
+<body data-page="login">
+  <header>
+    <h1>⏱ Teams Timecards</h1>
+    <div id="auth-area"></div>
+  </header>
+
+  <div id="error-banner"></div>
+
+  <div id="signin-screen">
+    <div class="signin-card">
+      <h2>Sign in</h2>
+      <p>Sign in with your Microsoft work or school account to view and manage your Teams timecards.</p>
+      <button class="btn btn-primary" id="btn-signin">Sign in with Microsoft</button>
+    </div>
+  </div>
+
+  <div id="toast-area"></div>
+</body>
+
+</html>

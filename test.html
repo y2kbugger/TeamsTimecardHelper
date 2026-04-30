@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teams Timecards Self Tests</title>
+  <link rel="stylesheet" href="common.css?v=20260430c" />
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2/lib/msal-browser.min.js"></script>
+  <script type="module" src="test.js?v=20260429m"></script>
+</head>
+
+<body data-page="test">
+  <header>
+    <h1>Teams Timecards Self Tests</h1>
+    <div id="auth-area">
+      <span id="test-auth-status">Checking auth…</span>
+      <div id="test-actions">
+        <button class="btn btn-primary" id="btn-test-signin">Sign in</button>
+        <button class="btn btn-secondary hidden-start" id="btn-test-signout">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="error-banner"></div>
+
+  <main class="test-shell">
+    <div class="test-meta" id="test-meta"></div>
+    <div class="test-summary" id="test-summary"></div>
+    <div id="test-results"></div>
+  </main>
+
+  <div id="toast-area"></div>
+</body>
+
+</html>

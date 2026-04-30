@@ -1,0 +1,61 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242736;--border:#2e3246;--accent:#5b6af5;--text:#e8eaf6;--text2:#9499b8;--danger:#e05c6a;--warn:#f0a843;--success:#4cba72}
+body{min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column}
+header{min-height:56px;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+header h1{flex:1;font-size:1.05rem}
+#auth-area,#test-actions,.modal-subheader,.modal-actions{display:flex;align-items:center;gap:8px}
+#auth-area{gap:10px;flex-wrap:wrap;justify-content:flex-end}
+#user-info,.form-group label,.panel-empty,#test-auth-status,.test-meta,.test-summary{color:var(--text2)}
+#user-info{max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn,input,textarea,select{font:inherit}
+.btn{padding:6px 14px;border:0;border-radius:6px;cursor:pointer}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-warn{background:var(--warn);color:#111}
+.btn-success{background:var(--success);color:#fff}
+.btn:disabled{opacity:.45;cursor:default}
+.hidden,.hidden-start{display:none}
+#signin-screen{flex:1;padding:24px;display:none;align-items:center;justify-content:center}
+.signin-card,.modal,.test-result{background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.signin-card{width:min(380px,100%);padding:40px 32px;text-align:center}
+.signin-card h2{margin-bottom:8px;font-size:1.3rem}
+.signin-card p{margin:0 0 28px;color:var(--text2);font-size:.85rem;line-height:1.6}
+.signin-card .btn{width:100%;padding:10px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;margin-bottom:5px;font-size:.78rem}
+.form-group :is(input,textarea,select){width:100%}
+input,textarea,select{padding:7px 10px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;outline:0}
+.panel-empty{padding:48px 24px;text-align:center}
+.spinner{display:inline-block;width:16px;height:16px;margin-right:6px;vertical-align:-3px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.modal-overlay{position:fixed;inset:0;padding:16px;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-overlay.hidden{display:none}
+.modal{width:min(480px,96vw);max-height:85vh;padding:24px;overflow:auto}
+#confirm-modal .modal{max-width:380px}
+.modal h2{margin-bottom:16px;font-size:1rem}
+.modal-subheader{justify-content:space-between;margin-bottom:8px}
+.modal-actions{justify-content:flex-end;margin-top:18px}
+.modal-subtitle{font-size:.8rem;font-weight:600}
+.btn-compact{padding:3px 10px;font-size:.74rem}
+.btn-break-remove{margin-top:18px;padding:4px 8px;font-size:.72rem}
+#confirm-msg{margin-bottom:18px}
+.confirm-beta-warn{margin-bottom:14px;padding:8px 12px;background:#3a2800;color:var(--warn);border:1px solid var(--warn);border-radius:6px;font-size:.76rem}
+#error-banner{display:none;padding:8px 18px;background:#3a0e14;color:var(--danger);border-bottom:1px solid var(--danger)}
+#toast-area{position:fixed;right:20px;bottom:20px;display:grid;gap:8px;z-index:9999}
+.toast{max-width:320px;padding:10px 14px;background:var(--surface2);color:var(--text);border-left:4px solid var(--accent);border-radius:6px}
+.toast.error{border-color:var(--danger)}
+.toast.success{border-color:var(--success)}
+.toast.warn{border-color:var(--warn)}
+.test-shell{padding:18px 20px 32px}
+#test-results{margin-top:16px;display:grid;gap:10px}
+.test-meta,.test-summary,#test-auth-status{font-size:.78rem;line-height:1.6}
+.test-summary{margin-top:12px}
+.test-result{padding:10px 12px;border-left:4px solid var(--border)}
+.test-result-pass{border-left-color:var(--success)}
+.test-result-fail{border-left-color:var(--danger)}
+.test-result-skip{border-left-color:var(--warn)}
+.test-result-running{border-left-color:var(--accent)}
+.test-result-name,.test-result-body{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace}
+.test-result-name{font-size:.82rem;font-weight:600}
+.test-result-body{margin-top:8px;white-space:pre-wrap;font-size:.76rem;color:var(--text2)}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teams Timecards</title>
+  <link rel="stylesheet" href="common.css?v=20260430c" />
+  <link rel="stylesheet" href="timecards.css?v=20260430e" />
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2/lib/msal-browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+  <script type="module" src="app.js?v=20260430e"></script>
+</head>
+
+<body data-page="app">
+  <header>
+    <h1>⏱ Teams Timecards</h1>
+    <div id="auth-area">
+      <span id="user-info"></span>
+      <button class="btn btn-secondary hidden-start" id="btn-change-team">Change Team</button>
+      <button class="btn btn-secondary hidden-start" id="btn-signout">Sign out</button>
+    </div>
+  </header>
+
+  <div id="error-banner"></div>
+  <div id="drag-tooltip"></div>
+
+  <div id="app" class="hidden-start">
+    <div id="main">
+      <div id="toolbar">
+        <span id="toolbar-title">Loading team…</span>
+        <span id="current-week-total" class="hidden-start">WEEK 00:00:00</span>
+        <div class="toolbar-week-nav hidden-start" id="week-nav">
+          <button class="btn btn-secondary btn-icon-only" id="btn-week-prev" title="Previous week" aria-label="Previous week">&#x2190;</button>
+          <input type="date" id="week-picker" aria-label="Week" />
+          <button class="btn btn-secondary btn-icon-only" id="btn-week-next" title="Next week" aria-label="Next week">&#x2192;</button>
+          <span id="week-range-label"></span>
+        </div>
+        <div id="toolbar-actions" class="hidden-start">
+          <button class="btn btn-success" id="btn-clock"></button>
+          <button class="btn btn-secondary" id="btn-break"></button>
+        </div>
+      </div>
+
+      <div id="content">
+        <div class="panel-empty hidden-start" id="team-picker-panel">
+          <div class="team-picker-card">
+            <p id="team-picker-msg">Choose the team to use for timecards. This is saved in your browser.</p>
+            <div class="team-picker-row">
+              <select id="team-picker-select"></select>
+              <button class="btn btn-primary" id="btn-team-save">Use Team</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel-empty hidden-start" id="no-team-msg"></div>
+        <div id="timecards-loading" class="panel-empty hidden-start">
+          <span class="spinner"></span>Loading timecards…
+        </div>
+        <div id="weeks-container" class="hidden-start"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="edit-modal">
+    <div class="modal">
+      <h2>Edit Timecard</h2>
+      <div class="form-group">
+        <label>Clock In</label>
+        <input type="datetime-local" id="edit-clock-in" />
+      </div>
+      <div class="form-group">
+        <label>Clock Out <span class="field-note">(leave blank if still active)</span></label>
+        <input type="datetime-local" id="edit-clock-out" />
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="edit-notes" rows="2"></textarea>
+      </div>
+      <div class="breaks-editor">
+        <div class="modal-subheader">
+          <span class="modal-subtitle">Breaks</span>
+          <button class="btn btn-secondary btn-compact" id="btn-add-break-edit">+ Add Break</button>
+        </div>
+        <div id="breaks-edit-container"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="btn-edit-cancel">Cancel</button>
+        <button class="btn btn-primary" id="btn-edit-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="confirm-modal">
+    <div class="modal">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-msg"></p>
+      <div id="confirm-beta-warn" class="confirm-beta-warn hidden-start">
+        ⚠️ <strong>Beta API:</strong> The timecard delete endpoint is currently in Microsoft Graph beta.
+        It may be unstable or change without notice.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="btn-confirm-cancel">Cancel</button>
+        <button class="btn btn-danger" id="btn-confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-area"></div>
+</body>
+
+</html>
