@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CACHE_STALE_MS = 45 * 1000;
 const BACKGROUND_REFRESH_MS = 30 * 1000;
 const TIMECARD_PAGE_SIZE = 250;
-const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260430c';
+const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260430d';
 
 const graphFetch = auth.graphFetch;
 const graphFetchBeta = auth.graphFetchBeta;
@@ -30,6 +30,7 @@ const timeCardCache = createTeamCacheState();
 let editTarget = null;
 let confirmResolve = null;
 let weeklyAverageFeatureInitPromise = null;
+let weeklyAverageFeatureModule = null;
 
 const appEl = $('app');
 const userInfo = $('user-info');
@@ -58,13 +59,27 @@ async function ensureWeeklyAverageFeature() {
     if (document.body.dataset.page !== 'app') return;
     if (!weeklyAverageFeatureInitPromise) {
         weeklyAverageFeatureInitPromise = import(WEEKLY_AVG_MODULE)
-            .then(module => module.initWeeklyAverageFeature())
+            .then(module => {
+                weeklyAverageFeatureModule = module;
+                module.initWeeklyAverageFeature({
+                    fetchTimeCardsForDateRange,
+                    formatDateInputValue,
+                    formatDurationHms,
+                    getCurrentAppState,
+                    getWeekRange,
+                });
+                syncWeeklyAverageFeatureVisibility();
+            })
             .catch(error => {
                 showError('Failed to load weekly average feature: ' + error.message);
                 throw error;
             });
     }
     return weeklyAverageFeatureInitPromise;
+}
+
+function syncWeeklyAverageFeatureVisibility() {
+    weeklyAverageFeatureModule?.setWeeklyAverageTriggerVisible?.(Boolean(selectedTeam));
 }
 
 export function getSelectedTeam() {
@@ -122,6 +137,7 @@ async function handleSignOut() {
     highlightedCardId = null;
     latestVisibleCardId = null;
     allTimeCards = [];
+    syncWeeklyAverageFeatureVisibility();
     localStorage.removeItem(SESSION_KEY_SELECTED_TEAM_ID);
     localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
     sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
@@ -140,6 +156,7 @@ function showStatusPanel(message, tone = 'default') {
     weekNav.style.display = 'none';
     currentWeekTotal.style.display = 'none';
     toolbarActions.style.display = 'none';
+    syncWeeklyAverageFeatureVisibility();
     btnChangeTeam.style.display = 'none';
 }
 
@@ -166,6 +183,7 @@ function showTeamPicker(message) {
     weekNav.style.display = 'none';
     currentWeekTotal.style.display = 'none';
     toolbarActions.style.display = 'none';
+    syncWeeklyAverageFeatureVisibility();
     btnChangeTeam.style.display = 'none';
     tcLoading.style.display = 'none';
     weeksContainer.style.display = 'none';
@@ -237,6 +255,7 @@ async function saveSelectedTeam() {
 
 async function selectTeam(team) {
     selectedTeam = team;
+    syncWeeklyAverageFeatureVisibility();
     localStorage.setItem(SESSION_KEY_SELECTED_TEAM_ID, team.id);
     toolbarTitle.textContent = team.displayName;
     toolbarActions.style.display = 'none';

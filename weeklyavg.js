@@ -1,10 +1,3 @@
-import {
-    fetchTimeCardsForDateRange,
-    formatDateInputValue,
-    formatDurationHms,
-    getCurrentAppState,
-    getWeekRange,
-} from './app.js';
 import { showError } from './ui.js';
 
 const STORAGE_KEY_START_DATE = 'tc_weekly_avg_start_date';
@@ -12,6 +5,12 @@ const STORAGE_KEY_WEEKLY_HOURS = 'tc_weekly_avg_weekly_hours';
 const DEFAULT_WEEKLY_HOURS = 25;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+
+let fetchTimeCardsForDateRange = null;
+let formatDateInputValue = null;
+let formatDurationHms = null;
+let getCurrentAppState = null;
+let getWeekRange = null;
 
 let triggerButton = null;
 let modalOverlay = null;
@@ -34,15 +33,34 @@ const shortDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: '
 const longDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const hoursFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
-export function initWeeklyAverageFeature() {
+export function initWeeklyAverageFeature(appApi) {
+    fetchTimeCardsForDateRange = appApi?.fetchTimeCardsForDateRange || fetchTimeCardsForDateRange;
+    formatDateInputValue = appApi?.formatDateInputValue || formatDateInputValue;
+    formatDurationHms = appApi?.formatDurationHms || formatDurationHms;
+    getCurrentAppState = appApi?.getCurrentAppState || getCurrentAppState;
+    getWeekRange = appApi?.getWeekRange || getWeekRange;
+    if (!fetchTimeCardsForDateRange || !formatDateInputValue || !formatDurationHms || !getCurrentAppState || !getWeekRange) {
+        throw new Error('Weekly average app API not initialized.');
+    }
     if (!triggerButton || !modalOverlay) buildFeatureUi();
     syncInputsFromSettings();
+    setWeeklyAverageTriggerVisible(Boolean(getCurrentAppState()?.team?.id));
     bindEventsOnce();
 }
 
+export function setWeeklyAverageTriggerVisible(visible) {
+    if (!triggerButton) return;
+    triggerButton.style.display = visible ? 'inline-flex' : 'none';
+    triggerButton.disabled = !visible;
+    if (!visible && isOpen) closeModal();
+}
+
 function buildFeatureUi() {
-    const toolbarActions = document.querySelector('#toolbar-actions');
-    if (!toolbarActions || !document.body) return;
+    const headerActions = document.querySelector('#header-actions');
+    if (!headerActions || !document.body) return;
+
+    document.querySelectorAll('.weekly-avg-trigger').forEach(element => element.remove());
+    document.querySelectorAll('#weekly-avg-modal').forEach(element => element.remove());
 
     triggerButton = document.createElement('button');
     triggerButton.type = 'button';
@@ -50,7 +68,8 @@ function buildFeatureUi() {
     triggerButton.textContent = 'Weekly Average';
     triggerButton.setAttribute('aria-haspopup', 'dialog');
     triggerButton.setAttribute('aria-expanded', 'false');
-    toolbarActions.insertBefore(triggerButton, toolbarActions.firstChild || null);
+    triggerButton.style.display = 'none';
+    headerActions.appendChild(triggerButton);
 
     modalOverlay = document.createElement('div');
     modalOverlay.className = 'modal-overlay hidden';
