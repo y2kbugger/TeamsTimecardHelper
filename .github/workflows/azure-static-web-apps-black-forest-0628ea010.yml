@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - static-root-preview
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
