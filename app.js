@@ -1,4 +1,4 @@
-import * as auth from './auth.js';
+import * as auth from './auth.js?v=20260501a';
 import { $, escHtml, toast, showError } from './ui.js';
 
 const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';

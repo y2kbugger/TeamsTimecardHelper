@@ -2,6 +2,15 @@ import { config } from './config.js';
 import { $, escHtml, toast, showError } from './ui.js';
 
 const DEFAULT_AUTHORITY_TENANT = 'organizations';
+const INTERACTION_REQUIRED_CODES = new Set([
+    'consent_required',
+    'interaction_required',
+    'login_required',
+    'no_account_error',
+    'no_tokens_found',
+    'token_refresh_required',
+    'user_login_error',
+]);
 
 let msalInstance = null;
 let currentAccount = null;
@@ -30,6 +39,45 @@ function closePopupWindow(message) {
     setTimeout(() => window.close(), 150);
 }
 
+function neverResolve() {
+    return new Promise(() => { });
+}
+
+function getErrorText(error) {
+    return `${error?.errorCode || error?.code || ''} ${error?.message || ''}`.toLowerCase();
+}
+
+function requiresInteractiveAuth(error) {
+    const code = String(error?.errorCode || error?.code || '').toLowerCase();
+    if (INTERACTION_REQUIRED_CODES.has(code)) return true;
+    return /consent required|interaction required|login required|no account|no tokens found|token refresh required|user login is required/i.test(error?.message || '');
+}
+
+function isPopupUnavailable(error) {
+    return /empty_window_error|popup_window_error/i.test(getErrorText(error));
+}
+
+function isPopupCancelled(error) {
+    return /popup_window_closed|user_cancelled|cancelled by user/i.test(getErrorText(error));
+}
+
+function shouldRetryGraphAuth(status, graphCode, authHeader) {
+    if (status === 401) return true;
+    if (status !== 403) return false;
+    return /claim|insufficient_claims|invalidauthenticationtoken|token|unauth/i.test(`${graphCode || ''} ${authHeader || ''}`);
+}
+
+function setCurrentAccount(account) {
+    currentAccount = account || null;
+    if (msalInstance) {
+        try { msalInstance.setActiveAccount(currentAccount); } catch { /* ignore */ }
+    }
+}
+
+function getPreferredAccount() {
+    return currentAccount || msalInstance?.getActiveAccount() || msalInstance?.getAllAccounts()?.[0] || null;
+}
+
 export function getRuntimeConfig() {
     const clientId = String(config.clientId || '').trim();
     if (!clientId) throw new Error('Missing clientId in config.js');
@@ -54,10 +102,7 @@ function getConfigKey(c) {
 }
 
 function clearMsalState() {
-    currentAccount = null;
-    if (msalInstance) {
-        try { msalInstance.setActiveAccount(null); } catch { /* ignore */ }
-    }
+    setCurrentAccount(null);
     for (const storage of [sessionStorage, localStorage]) {
         for (let i = storage.length - 1; i >= 0; i -= 1) {
             const key = storage.key(i);
@@ -106,8 +151,7 @@ async function initializeSessionInternal() {
     try {
         redirectResponse = await msalInstance.handleRedirectPromise();
         if (redirectResponse?.account) {
-            msalInstance.setActiveAccount(redirectResponse.account);
-            currentAccount = redirectResponse.account;
+            setCurrentAccount(redirectResponse.account);
         }
     } catch (error) {
         if (isPopupContext()) renderPopupStatus('Sign-in hit an error. You can close this window.');
@@ -122,10 +166,9 @@ async function initializeSessionInternal() {
 
     const activeAccount = msalInstance.getActiveAccount() || msalInstance.getAllAccounts()[0] || null;
     if (activeAccount) {
-        msalInstance.setActiveAccount(activeAccount);
-        currentAccount = activeAccount;
+        setCurrentAccount(activeAccount);
     } else {
-        currentAccount = null;
+        setCurrentAccount(null);
     }
 
     return { ready: true, authenticated: Boolean(currentAccount), account: currentAccount };
@@ -152,14 +195,13 @@ export async function signIn({ navigateToApp = document.body?.dataset.page === '
     const loginRequest = { scopes: getScopes() };
     try {
         const response = await msalInstance.loginPopup(loginRequest);
-        currentAccount = response.account;
-        msalInstance.setActiveAccount(response.account);
+        setCurrentAccount(response.account);
         if (navigateToApp) redirectToApp();
         return currentAccount;
     } catch (popupError) {
         if (popupError.errorCode === 'popup_window_error' || popupError.errorCode === 'empty_window_error') {
             await msalInstance.loginRedirect(loginRequest);
-            return null;
+            return neverResolve();
         }
         if (popupError.message && popupError.message.includes('AADSTS700016')) {
             clearMsalState();
@@ -172,9 +214,6 @@ export async function signIn({ navigateToApp = document.body?.dataset.page === '
 }
 
 export async function signOut({ navigateToLogin = true } = {}) {
-    if (msalInstance) {
-        await msalInstance.logoutPopup({ account: currentAccount }).catch(() => { });
-    }
     clearMsalState();
     if (navigateToLogin) redirectToLogin();
 }
@@ -188,30 +227,57 @@ export function getCurrentAccount() {
     return currentAccount;
 }
 
-async function acquireToken() {
-    const request = { scopes: getScopes(), account: currentAccount };
-    try {
-        const response = await msalInstance.acquireTokenSilent(request);
-        return response.accessToken;
-    } catch {
+async function acquireToken({ forceRefresh = false } = {}) {
+    await initializeSession();
+    const request = { scopes: getScopes(), account: getPreferredAccount(), forceRefresh };
+    if (!request.account) {
         if (isPopupContext()) throw new Error('Cannot refresh token inside a popup context');
         if (!popupTokenPromise) {
+            popupTokenPromise = msalInstance.acquireTokenRedirect({ scopes: request.scopes })
+                .then(() => neverResolve())
+                .finally(() => { popupTokenPromise = null; });
+        }
+        return popupTokenPromise;
+    }
+    try {
+        const response = await msalInstance.acquireTokenSilent(request);
+        if (response?.account) setCurrentAccount(response.account);
+        return response.accessToken;
+    } catch (silentError) {
+        if (isPopupContext()) throw new Error('Cannot refresh token inside a popup context');
+        if (!requiresInteractiveAuth(silentError)) throw silentError;
+        if (!popupTokenPromise) {
             popupTokenPromise = msalInstance.acquireTokenPopup(request)
+                .then(response => {
+                    if (response?.account) setCurrentAccount(response.account);
+                    return response.accessToken;
+                })
+                .catch(async popupError => {
+                    if (isPopupCancelled(popupError)) throw popupError;
+                    if (isPopupUnavailable(popupError) || requiresInteractiveAuth(popupError)) {
+                        toast('Session expired — signing in again.', 'info');
+                        await msalInstance.acquireTokenRedirect(request);
+                        return neverResolve();
+                    }
+                    throw popupError;
+                })
                 .finally(() => { popupTokenPromise = null; });
         }
         try {
-            const response = await popupTokenPromise;
-            return response.accessToken;
+            return await popupTokenPromise;
         } catch (popupError) {
-            currentAccount = null;
-            toast('Session expired — please sign in again.', 'error');
+            if (isPopupCancelled(popupError)) toast('Sign-in was cancelled.', 'error');
+            else {
+                setCurrentAccount(null);
+                toast('Session expired — please sign in again.', 'error');
+            }
             throw popupError;
         }
     }
 }
 
-async function graphRequest(baseUrl, url, options) {
-    const token = await acquireToken();
+async function graphRequest(baseUrl, url, options, authRetry = true) {
+    const token = await acquireToken({ forceRefresh: !authRetry });
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
     const headers = {
         Authorization: `Bearer ${token}`,
@@ -221,9 +287,18 @@ async function graphRequest(baseUrl, url, options) {
     const response = await fetch(fullUrl, { ...options, headers });
     if (!response.ok) {
         let message = `Graph API error ${response.status}`;
-        try { message = (await response.json())?.error?.message || message; } catch { /* ignore */ }
+        let graphCode = '';
+        try {
+            const payload = await response.json();
+            graphCode = payload?.error?.code || '';
+            message = payload?.error?.message || message;
+        } catch { /* ignore */ }
+        if (authRetry && shouldRetryGraphAuth(response.status, graphCode, response.headers.get('www-authenticate'))) {
+            try { return await graphRequest(baseUrl, url, options, false); } catch (retryError) { throw retryError; }
+        }
         const error = new Error(message);
         error.status = response.status;
+        error.code = graphCode;
         throw error;
     }
     return response.status === 204 ? null : response.json();

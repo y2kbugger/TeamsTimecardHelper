@@ -62,4 +62,6 @@
 - We want to reduce conceptual overhead of fluff code, so therefore:
     - Reduce css to 30% (character count)
     - Reduce js to 60% (character count)
+- add mobile css
+- resign in auto or token refresh 
 

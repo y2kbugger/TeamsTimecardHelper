@@ -1,4 +1,4 @@
-import * as auth from './auth.js';
+import * as auth from './auth.js?v=20260501a';
 import {
     fetchJoinedTeams,
     fetchWeekTimeCards,
