@@ -19,16 +19,25 @@
   padding: 10px 18px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap
+  gap: 8px
 }
 
 #toolbar-title {
-  flex: 1;
-  min-width: 120px;
+  min-width: 0;
+  justify-self: start;
   font-weight: 600
+}
+
+#toolbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0
 }
 
 #toolbar .btn {
@@ -59,6 +68,10 @@
 .team-picker-row,
 .break-row {
   align-items: center
+}
+
+#toolbar-actions {
+  justify-self: end
 }
 
 #toolbar-actions .btn {
@@ -447,6 +460,17 @@
   font-size: .75rem
 }
 
+.break-row-detail {
+  flex: 0 1 auto;
+  min-width: 0
+}
+
+.break-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px
+}
+
 .break-label {
   color: var(--warn)
 }
@@ -492,6 +516,15 @@
 }
 
 @media (max-width:700px) {
+
+  #toolbar {
+    display: flex;
+    flex-wrap: wrap
+  }
+
+  #toolbar-center {
+    width: 100%
+  }
 
   .team-picker-row,
   .day-section-header,

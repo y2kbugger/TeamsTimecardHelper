@@ -1122,7 +1122,7 @@ function renderDayCardList(cards, listEl) {
         const stack = document.createElement('div');
         stack.className = 'tc-card-stack';
         stack.appendChild(buildCardRow(card));
-        if (card.breaks.length) stack.appendChild(buildBreaksList(card));
+        if (card.breaks.length || getCardBreakAction(card)) stack.appendChild(buildBreaksList(card));
         listEl.appendChild(stack);
     });
 }
@@ -1159,9 +1159,45 @@ function buildCardRow(card) {
     return row;
 }
 
+function getCardBreakAction(card) {
+    if (!card || activeTimeCard?.id !== card.id) return '';
+    if (card.state === 'clockedIn') return 'startBreak';
+    if (card.state === 'onBreak') return 'endBreak';
+    return '';
+}
+
+function buildBreakActionButton(card, actionKey) {
+    const action = TOOLBAR_ACTIONS[actionKey];
+    if (!card || !action) return null;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = actionKey === 'endBreak' ? 'btn btn-success btn-compact' : 'btn btn-warn btn-compact';
+    button.textContent = action.label;
+    button.title = action.label;
+    button.addEventListener('click', event => {
+        event.stopPropagation();
+        void runCardBreakAction(card, actionKey, button);
+    });
+    return button;
+}
+
+function buildBreakControlRow(card, actionKey, label) {
+    const row = document.createElement('div');
+    row.className = 'break-row break-row-control';
+    row.innerHTML = `<span class="break-label">↳ ${label}</span>`;
+    const actions = document.createElement('span');
+    actions.className = 'break-row-actions';
+    const button = buildBreakActionButton(card, actionKey);
+    if (button) actions.appendChild(button);
+    row.appendChild(actions);
+    return row;
+}
+
 function buildBreaksList(card) {
     const wrapper = document.createElement('div');
     wrapper.className = 'breaks-list';
+    const cardBreakAction = getCardBreakAction(card);
+    let placedInlineEndBreak = false;
     card.breaks.forEach((b, idx) => {
         const bStart = b.start ? fmtDateTime(new Date(b.start.dateTime)) : '—';
         const bEnd = b.end ? fmtDateTime(new Date(b.end.dateTime)) : 'ongoing';
@@ -1173,17 +1209,45 @@ function buildBreaksList(card) {
         brow.innerHTML = `
             <span class="break-label">↳ Break ${idx + 1}:</span>
       <span class="break-row-detail">${bStart} → ${bEnd} ${dur ? `(${dur})` : ''}</span>
-            ${b.breakId ? `<button class="btn btn-danger btn-compact btn-icon-only" data-action="delete-break" data-card-id="${card.id}" data-break-id="${b.breakId}" title="Delete break" aria-label="Delete break">&#x1F5D1;</button>` : ''}
     `;
-        const deleteBtn = brow.querySelector('[data-action="delete-break"]');
-        if (deleteBtn) {
+        const actions = document.createElement('span');
+        actions.className = 'break-row-actions';
+
+        if (cardBreakAction === 'endBreak' && b.start && !b.end) {
+            const endBreakBtn = buildBreakActionButton(card, 'endBreak');
+            if (endBreakBtn) {
+                actions.appendChild(endBreakBtn);
+                placedInlineEndBreak = true;
+            }
+        }
+
+        if (b.breakId) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'btn btn-danger btn-compact btn-icon-only';
+            deleteBtn.dataset.action = 'delete-break';
+            deleteBtn.dataset.cardId = card.id;
+            deleteBtn.dataset.breakId = b.breakId;
+            deleteBtn.title = 'Delete break';
+            deleteBtn.setAttribute('aria-label', 'Delete break');
+            deleteBtn.innerHTML = '&#x1F5D1;';
             deleteBtn.addEventListener('click', event => {
                 event.stopPropagation();
                 void confirmDeleteBreak(card.id, b.breakId);
             });
+            actions.appendChild(deleteBtn);
         }
+
+        if (actions.childElementCount) brow.appendChild(actions);
         wrapper.appendChild(brow);
     });
+
+    if (cardBreakAction === 'startBreak') {
+        wrapper.appendChild(buildBreakControlRow(card, 'startBreak', 'Next Break:'));
+    } else if (cardBreakAction === 'endBreak' && !placedInlineEndBreak) {
+        wrapper.appendChild(buildBreakControlRow(card, 'endBreak', 'Current Break:'));
+    }
+
     return wrapper;
 }
 
@@ -1258,12 +1322,7 @@ function updateToolbarState() {
             action: 'clockOut',
             title: 'End the active timecard',
         });
-        setToolbarButton(btnBreak, {
-            label: 'Start Break',
-            className: 'btn btn-warn',
-            action: 'startBreak',
-            title: 'Start a break on the active timecard',
-        });
+        setToolbarButton(btnBreak, { display: 'none', action: '' });
     } else {
         setToolbarButton(btnClock, {
             label: 'On Break',
@@ -1272,12 +1331,7 @@ function updateToolbarState() {
             disabled: true,
             title: 'End the current break before clocking out',
         });
-        setToolbarButton(btnBreak, {
-            label: 'End Break',
-            className: 'btn btn-success',
-            action: 'endBreak',
-            title: 'End the current break',
-        });
+        setToolbarButton(btnBreak, { display: 'none', action: '' });
     }
 
     toolbarActions.style.display = 'flex';
@@ -1289,6 +1343,19 @@ function onClockClick() {
 
 function onBreakClick() {
     return runToolbarAction(btnBreak);
+}
+
+function runCardBreakAction(card, actionKey, button) {
+    const action = TOOLBAR_ACTIONS[actionKey];
+    if (!card || !action) return;
+    return doTimeCardAction({
+        btn: button,
+        endpoint: action.endpoint,
+        label: action.label,
+        successMsg: action.successMsg,
+        useActive: false,
+        targetCard: card,
+    });
 }
 
 async function runToolbarAction(button) {
@@ -1305,25 +1372,25 @@ async function runToolbarAction(button) {
     });
 }
 
-async function doTimeCardAction({ btn, endpoint, label, successMsg, useActive, weekStartInput = null }) {
-    if (useActive && !activeTimeCard) return;
+async function doTimeCardAction({ btn, endpoint, label, successMsg, useActive, weekStartInput = null, targetCard = null }) {
+    const resolvedCard = targetCard || (useActive ? activeTimeCard : null);
+    if ((useActive || targetCard) && !resolvedCard) return;
     if (!selectedTeam) return;
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
     const teamId = selectedTeam.id;
-    const targetCard = useActive ? activeTimeCard : null;
     try {
-        const response = await graphFetch(`/teams/${teamId}/schedule/timeCards${endpoint(targetCard?.id)}`, {
+        const response = await graphFetch(`/teams/${teamId}/schedule/timeCards${endpoint(resolvedCard?.id)}`, {
             method: 'POST',
             body: JSON.stringify({ atApprovedLocation: false, notes: { contentType: 'text', content: '' } }),
         });
         const updated = await resolveTimeCardActionResponse(response, {
-            actionLabel: label, teamId, cardId: targetCard?.id || '', weekStartInput,
+            actionLabel: label, teamId, cardId: resolvedCard?.id || '', weekStartInput,
         });
         applyUpdatedCardLocally(updated);
         toast(successMsg, 'success');
     } catch (e) {
         toast(`${label} failed: ${e.message}`, 'error');
-        btn.disabled = false;
+        if (btn) btn.disabled = false;
     }
 }
 

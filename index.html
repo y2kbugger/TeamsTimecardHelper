@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Teams Timecards</title>
   <link rel="stylesheet" href="common.css?v=20260430d" />
-  <link rel="stylesheet" href="timecards.css?v=20260430g" />
+  <link rel="stylesheet" href="timecards.css?v=20260501c" />
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2/lib/msal-browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
-  <script type="module" src="app.js?v=20260430k"></script>
+  <script type="module" src="app.js?v=20260501a"></script>
 </head>
 
 <body data-page="app">
@@ -30,14 +30,16 @@
     <div id="main">
       <div id="toolbar">
         <span id="toolbar-title">Loading team…</span>
-        <span id="current-week-total" class="hidden-start">WEEK 00:00:00</span>
-        <div class="toolbar-week-nav hidden-start" id="week-nav">
-          <button class="btn btn-secondary btn-icon-only" id="btn-week-prev" title="Previous week"
-            aria-label="Previous week">&#x2190;</button>
-          <input type="date" id="week-picker" aria-label="Week" />
-          <button class="btn btn-secondary btn-icon-only" id="btn-week-next" title="Next week"
-            aria-label="Next week">&#x2192;</button>
-          <span id="week-range-label"></span>
+        <div id="toolbar-center">
+          <span id="current-week-total" class="hidden-start">WEEK 00:00:00</span>
+          <div class="toolbar-week-nav hidden-start" id="week-nav">
+            <button class="btn btn-secondary btn-icon-only" id="btn-week-prev" title="Previous week"
+              aria-label="Previous week">&#x2190;</button>
+            <input type="date" id="week-picker" aria-label="Week" />
+            <button class="btn btn-secondary btn-icon-only" id="btn-week-next" title="Next week"
+              aria-label="Next week">&#x2192;</button>
+            <span id="week-range-label"></span>
+          </div>
         </div>
         <div id="toolbar-actions" class="hidden-start">
           <button class="btn btn-success" id="btn-clock"></button>
