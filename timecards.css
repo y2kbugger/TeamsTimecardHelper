@@ -143,6 +143,81 @@
   margin: 14px 0 10px
 }
 
+.weekly-avg-workdays {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 280px)
+}
+
+.weekly-avg-workdays legend {
+  padding: 0;
+  font-size: .72rem;
+  color: var(--text2)
+}
+
+.weekly-avg-workdays-grid {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap
+}
+
+.weekly-avg-day-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(0, 0, 0, .08));
+  color: var(--text2);
+  font: 700 .8rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  cursor: pointer;
+  transition: transform .14s ease, border-color .14s ease, background-color .14s ease, color .14s ease, box-shadow .14s ease
+}
+
+.weekly-avg-day-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(108, 124, 255, .45)
+}
+
+.weekly-avg-day-chip input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer
+}
+
+.weekly-avg-day-chip.is-selected {
+  color: #f4fff8;
+  border-color: rgba(91, 214, 141, .75);
+  background: linear-gradient(135deg, rgba(40, 107, 71, .96), rgba(31, 83, 57, .96));
+  box-shadow: 0 10px 22px rgba(18, 38, 28, .22), inset 0 0 0 1px rgba(209, 255, 228, .12)
+}
+
+.weekly-avg-day-chip input:focus-visible + span {
+  outline: 2px solid rgba(108, 124, 255, .8);
+  outline-offset: 4px;
+  border-radius: 999px
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0
+}
+
 .weekly-avg-field {
   display: grid;
   gap: 4px;
@@ -561,6 +636,10 @@
   .weekly-avg-trigger {
     width: 100%;
     min-width: 0
+  }
+
+  .weekly-avg-workdays {
+    width: 100%
   }
 
   .weekly-avg-modal-shell {

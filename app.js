@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CACHE_STALE_MS = 45 * 1000;
 const BACKGROUND_REFRESH_MS = 30 * 1000;
 const TIMECARD_PAGE_SIZE = 250;
-const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260430f';
+const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260501b';
 
 const graphFetch = auth.graphFetch;
 const graphFetchBeta = auth.graphFetchBeta;
