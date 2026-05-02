@@ -40,8 +40,11 @@ let pendingCardsKey = '';
 let pendingCardsPromise = null;
 let isOpen = false;
 let eventsBound = false;
+let previousBodyOverflow = '';
+let previousDocumentOverflow = '';
 
 const shortDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+const weekdayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 const longDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const hoursFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
@@ -122,14 +125,20 @@ function buildFeatureUi() {
             <div class="weekly-avg-empty hidden-start"></div>
             <div class="weekly-avg-table-wrap hidden-start">
                 <table class="weekly-avg-table">
+                    <colgroup>
+                        <col class="weekly-avg-col-label-col" />
+                        <col class="weekly-avg-col-time-main-col" />
+                        <col class="weekly-avg-col-time-main-col" />
+                        <col class="weekly-avg-col-symbol-col" />
+                        <col class="weekly-avg-col-symbol-col" />
+                    </colgroup>
                     <thead>
                         <tr>
-                            <th>Week</th>
-                            <th>Expected/day</th>
-                            <th>Expected week</th>
-                            <th>Actual week</th>
-                            <th>Weekly</th>
-                            <th>Cum.</th>
+                            <th class="weekly-avg-col-label"></th>
+                            <th class="weekly-avg-col-time weekly-avg-col-time-main">Expected</th>
+                            <th class="weekly-avg-col-time weekly-avg-col-time-main">Actual</th>
+                            <th class="weekly-avg-col-time weekly-avg-col-symbol"><span class="weekly-avg-col-symbol-mark">&plusmn;&Delta;</span></th>
+                            <th class="weekly-avg-col-time weekly-avg-col-symbol"><span class="weekly-avg-col-symbol-mark">&Sigma;</span></th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -178,6 +187,7 @@ function openModal() {
     isOpen = true;
     triggerButton.setAttribute('aria-expanded', 'true');
     syncInputsFromSettings();
+    lockBackgroundScroll();
     modalOverlay.classList.remove('hidden');
     startInput.focus();
     void refreshFromAppState(appState);
@@ -188,7 +198,20 @@ function closeModal() {
     isOpen = false;
     triggerButton?.setAttribute('aria-expanded', 'false');
     modalOverlay.classList.add('hidden');
+    unlockBackgroundScroll();
     triggerButton?.focus();
+}
+
+function lockBackgroundScroll() {
+    previousBodyOverflow = document.body?.style.overflow || '';
+    previousDocumentOverflow = document.documentElement?.style.overflow || '';
+    if (document.body) document.body.style.overflow = 'hidden';
+    if (document.documentElement) document.documentElement.style.overflow = 'hidden';
+}
+
+function unlockBackgroundScroll() {
+    if (document.body) document.body.style.overflow = previousBodyOverflow;
+    if (document.documentElement) document.documentElement.style.overflow = previousDocumentOverflow;
 }
 
 function onSettingsChange() {
@@ -405,46 +428,89 @@ function buildWeeklyModel(cards, settings, currentWeekStart, now) {
     const dailyActuals = buildDailyActuals(cards, rangeStartMs, rangeEndMs);
     const currentWeekKey = formatDateInputValue(currentWeekStart);
     const todayStart = startOfDay(now).getTime();
-    const rows = [];
+    const weekEntries = [];
     let expectedCumulativeMs = 0;
     let actualCumulativeMs = 0;
     const firstWeekStart = getWeekRange(settings.startDate).weekStart;
 
     for (let weekStart = new Date(firstWeekStart); weekStart.getTime() <= currentWeekStart.getTime(); weekStart = addCalendarDays(weekStart, 7)) {
+        const weekKey = formatDateInputValue(weekStart);
+        const isCurrentWeek = weekKey === currentWeekKey;
+        const expectedCumulativeBeforeWeekMs = expectedCumulativeMs;
+        const actualCumulativeBeforeWeekMs = actualCumulativeMs;
         const weekStartMs = weekStart.getTime();
         const weekEnd = addCalendarDays(weekStart, 6);
         let expectedWeekMs = 0;
         let actualWeekMs = 0;
+        let expectedWeekRunningMs = 0;
+        let actualWeekRunningMs = 0;
+        const detailRows = [];
 
         for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
             const day = addCalendarDays(weekStart, dayIndex);
             const dayMs = day.getTime();
             const dayKey = formatDateInputValue(day);
-            const inScope = dayMs >= rangeStartMs && dayMs <= todayStart;
-            const expectedDayMs = inScope ? getExpectedDayMs(day, settings) : 0;
+            const isBeforeStart = dayMs < rangeStartMs;
+            const actualDayMs = dailyActuals.get(dayKey) || 0;
+            const expectedDayMs = isBeforeStart ? 0 : getExpectedDayMs(day, settings);
+
             expectedWeekMs += expectedDayMs;
-            actualWeekMs += dailyActuals.get(dayKey) || 0;
+            actualWeekMs += actualDayMs;
+
+            if (isCurrentWeek) {
+                expectedWeekRunningMs += expectedDayMs;
+                actualWeekRunningMs += actualDayMs;
+                detailRows.push({
+                    rowType: 'day',
+                    day,
+                    expectedDailyMs: expectedDayMs,
+                    expectedWeekMs: expectedWeekRunningMs,
+                    actualDailyMs: actualDayMs,
+                    actualWeekMs: actualWeekRunningMs,
+                    weeklyDifferenceMs: actualDayMs - expectedDayMs,
+                    differenceMs: (actualCumulativeBeforeWeekMs + actualWeekRunningMs) - (expectedCumulativeBeforeWeekMs + expectedWeekRunningMs),
+                    isFutureDay: dayMs > todayStart,
+                    isBeforeStart,
+                    isWorkday: !isBeforeStart && expectedDayMs > 0,
+                    isDetailFirst: dayIndex === 0,
+                });
+            }
         }
 
         expectedCumulativeMs += expectedWeekMs;
         actualCumulativeMs += actualWeekMs;
-        rows.push({
-            weekStart,
-            weekEnd,
-            expectedDailyMs: settings.dailyTargetMs,
-            expectedWeekMs,
-            actualWeekMs,
-            weeklyDifferenceMs: actualWeekMs - expectedWeekMs,
-            expectedCumulativeMs,
-            actualCumulativeMs,
-            differenceMs: actualCumulativeMs - expectedCumulativeMs,
-            isCurrentWeek: formatDateInputValue(weekStart) === currentWeekKey,
-            isPartialWeek: expectedWeekMs < (settings.dailyTargetMs * settings.workdays.length),
+        weekEntries.push({
+            weekRow: {
+                rowType: 'week',
+                weekStart,
+                weekEnd,
+                expectedDailyMs: settings.dailyTargetMs,
+                expectedWeekMs,
+                actualWeekMs,
+                weeklyDifferenceMs: actualWeekMs - expectedWeekMs,
+                expectedCumulativeMs,
+                actualCumulativeMs,
+                differenceMs: actualCumulativeMs - expectedCumulativeMs,
+                isCurrentWeek,
+                isPartialWeek: expectedWeekMs < (settings.dailyTargetMs * settings.workdays.length),
+            },
+            detailRows,
         });
     }
 
+    const rows = [];
+    weekEntries.reverse().forEach(entry => {
+        rows.push(entry.weekRow);
+        if (entry.weekRow.isCurrentWeek) {
+            rows.push(...entry.detailRows.slice().reverse().map((row, index) => ({
+                ...row,
+                isDetailFirst: index === 0,
+            })));
+        }
+    });
+
     return {
-        rows: rows.reverse(),
+        rows,
         expectedCumulativeMs,
         actualCumulativeMs,
         differenceMs: actualCumulativeMs - expectedCumulativeMs,
@@ -521,23 +587,50 @@ function describeDifference(differenceMs) {
 }
 
 function buildRow(row) {
+    if (row.rowType === 'day') return buildDayRow(row);
+
     const tr = document.createElement('tr');
     const weeklyDiffClass = getDifferenceClass(row.weeklyDifferenceMs);
     const cumulativeDiffClass = getDifferenceClass(row.differenceMs);
     const weekState = row.isCurrentWeek ? 'Current week' : row.isPartialWeek ? 'Partial week' : '';
     tr.className = row.isCurrentWeek ? 'weekly-avg-row-current' : '';
     tr.innerHTML = `
-        <td>
+        <td class="weekly-avg-cell-label">
             <div class="weekly-avg-week-label">${shortDateFmt.format(row.weekStart)} - ${shortDateFmt.format(row.weekEnd)}</div>
             ${weekState ? `<div class="weekly-avg-week-state">${weekState}</div>` : ''}
         </td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.expectedDailyMs)}</td>
         <td class="weekly-avg-mono">${formatDurationHms(row.expectedWeekMs)}</td>
         <td class="weekly-avg-mono">${formatDurationHms(row.actualWeekMs)}</td>
-        <td class="weekly-avg-mono ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
-        <td class="weekly-avg-mono ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
+        <td class="weekly-avg-mono weekly-avg-mono-signed ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
+        <td class="weekly-avg-mono weekly-avg-mono-signed ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
     `;
     return tr;
+}
+
+function buildDayRow(row) {
+    const tr = document.createElement('tr');
+    const weeklyDiffClass = getDifferenceClass(row.weeklyDifferenceMs);
+    const cumulativeDiffClass = getDifferenceClass(row.differenceMs);
+    tr.className = [
+        'weekly-avg-row-detail',
+        row.isDetailFirst ? 'weekly-avg-row-detail-first' : '',
+        row.isFutureDay ? 'weekly-avg-row-detail-future' : '',
+        row.isWorkday ? '' : 'weekly-avg-row-detail-off',
+    ].filter(Boolean).join(' ');
+    tr.innerHTML = `
+        <td class="weekly-avg-cell-label">
+            <div class="weekly-avg-week-label weekly-avg-day-label">${weekdayFmt.format(row.day)}</div>
+        </td>
+        <td class="weekly-avg-mono">${formatExpectedDetailDuration(row.expectedDailyMs, row.isWorkday)}</td>
+        <td class="weekly-avg-mono">${formatDurationHms(row.actualDailyMs)}</td>
+        <td class="weekly-avg-mono weekly-avg-mono-signed ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
+        <td class="weekly-avg-mono weekly-avg-mono-signed ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
+    `;
+    return tr;
+}
+
+function formatExpectedDetailDuration(durationMs, isWorkday) {
+    return isWorkday ? formatDurationHms(durationMs) : '—';
 }
 
 function getDifferenceClass(durationMs) {
@@ -549,6 +642,6 @@ function getDifferenceClass(durationMs) {
 }
 
 function formatSignedDuration(durationMs) {
-    const prefix = durationMs < 0 ? '-' : durationMs > 0 ? '+' : '';
+    const prefix = durationMs < 0 ? '-' : durationMs > 0 ? '+' : '\u2007';
     return `${prefix}${formatDurationHms(Math.abs(durationMs))}`;
 }
