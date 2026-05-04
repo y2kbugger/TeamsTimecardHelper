@@ -138,7 +138,6 @@ async function handleSignOut() {
     latestVisibleCardId = null;
     allTimeCards = [];
     syncWeeklyAverageFeatureVisibility();
-    localStorage.removeItem(SESSION_KEY_SELECTED_TEAM_ID);
     localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
     sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
     document.title = 'Teams Timecards';
