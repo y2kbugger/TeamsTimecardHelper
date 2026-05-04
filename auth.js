@@ -3,9 +3,11 @@ import { $, escHtml, toast, showError } from './ui.js';
 
 const DEFAULT_AUTHORITY_TENANT = 'organizations';
 const INTERACTION_REQUIRED_CODES = new Set([
+    'block_iframe_reload',
     'consent_required',
     'interaction_required',
     'login_required',
+    'monitor_window_timeout',
     'no_account_error',
     'no_tokens_found',
     'token_refresh_required',
@@ -50,7 +52,7 @@ function getErrorText(error) {
 function requiresInteractiveAuth(error) {
     const code = String(error?.errorCode || error?.code || '').toLowerCase();
     if (INTERACTION_REQUIRED_CODES.has(code)) return true;
-    return /consent required|interaction required|login required|no account|no tokens found|token refresh required|user login is required/i.test(error?.message || '');
+    return /consent required|interaction required|login required|no account|no tokens found|token refresh required|user login is required|token acquisition in iframe failed due to timeout|monitor_window_timeout|iframe/i.test(error?.message || '');
 }
 
 function isPopupUnavailable(error) {
@@ -232,12 +234,9 @@ async function acquireToken({ forceRefresh = false } = {}) {
     const request = { scopes: getScopes(), account: getPreferredAccount(), forceRefresh };
     if (!request.account) {
         if (isPopupContext()) throw new Error('Cannot refresh token inside a popup context');
-        if (!popupTokenPromise) {
-            popupTokenPromise = msalInstance.acquireTokenRedirect({ scopes: request.scopes })
-                .then(() => neverResolve())
-                .finally(() => { popupTokenPromise = null; });
-        }
-        return popupTokenPromise;
+        clearMsalState();
+        redirectToLogin();
+        return neverResolve();
     }
     try {
         const response = await msalInstance.acquireTokenSilent(request);
@@ -256,7 +255,8 @@ async function acquireToken({ forceRefresh = false } = {}) {
                     if (isPopupCancelled(popupError)) throw popupError;
                     if (isPopupUnavailable(popupError) || requiresInteractiveAuth(popupError)) {
                         toast('Session expired — signing in again.', 'info');
-                        await msalInstance.acquireTokenRedirect(request);
+                        clearMsalState();
+                        redirectToLogin();
                         return neverResolve();
                     }
                     throw popupError;
