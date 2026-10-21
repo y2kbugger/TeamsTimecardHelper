@@ -167,6 +167,8 @@ async function signInAgain() {
 
 async function acquireToken({ forceRefresh = false } = {}) {
     await initializeSession();
+    // Unbounded on purpose: each pass that finds no token waits for the user to sign in again,
+    // for as long as that takes. It spins only as fast as they click Sign in.
     for (;;) {
         if (mockEnabled) {
             if (!sessionStorage.getItem(MOCK_EXPIRED_KEY)) return 'mock-token';
