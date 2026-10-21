@@ -6,7 +6,7 @@ import {
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
     buildProjectedTimelineUpdate, getWorkSegments, buildDailyActuals, buildWeeklyModel,
-    dragBounds, applyDrag, readEditForm, SNAP_MS,
+    dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
 } from '../core.js';
 
 const local = s => new Date(s); // 'YYYY-MM-DDTHH:MM' parses as local time
@@ -142,6 +142,39 @@ test('drag: an edge with no room to move refuses', () => {
     assert.equal(dragBounds(c, 0, 'start', now), null);
     assert.equal(applyDrag(c, 0, 'start', now, now), null);
     assert.ok(dragBounds(c, null, 'end', now), 'the card itself can still grow');
+});
+
+test('new break: ten minutes around the pointer, snapped', () => {
+    const now = local('2026-10-21T18:00').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', breaks: [['2026-10-21T10:30', '2026-10-21T10:45']] });
+    const at = s => local(s).getTime();
+    const hhmm = ms => toLocalDatetimeInput(new Date(ms)).slice(11);
+    const proposed = s => { const p = proposeBreak(c, at(s), now); return p && `${hhmm(p.startMs)}-${hhmm(p.endMs)}`; };
+    assert.equal(proposed('2026-10-21T11:22'), '11:15-11:25');
+    assert.equal(proposed('2026-10-21T10:47'), '10:45-10:55', 'pushed out of the break before it');
+    assert.equal(proposed('2026-10-21T10:28'), '10:20-10:30', 'pushed out of the break after it');
+    assert.equal(proposed('2026-10-21T09:01'), '09:00-09:10', 'held inside the card');
+    assert.equal(proposed('2026-10-21T10:35'), null, 'not on a break');
+    assert.equal(proposed('2026-10-21T08:00'), null, 'not outside the card');
+    const added = addBreak(c, proposeBreak(c, at('2026-10-21T11:22'), now));
+    assert.equal(added.breaks.length, 2);
+    assert.equal(added.breaks[0].breakId, 'b0', 'the old break keeps its id');
+    assert.equal(c.breaks.length, 1, 'the original is untouched');
+});
+
+test('new break: shorter in a small gap, none in a gap under five minutes', () => {
+    const now = local('2026-10-21T18:00').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', breaks: [['2026-10-21T10:00', '2026-10-21T10:15'], ['2026-10-21T10:22', '2026-10-21T10:30'], ['2026-10-21T10:33', '2026-10-21T10:40']] });
+    const gap7 = proposeBreak(c, local('2026-10-21T10:18').getTime(), now);
+    assert.equal(gap7.endMs - gap7.startMs, 5 * 60e3);
+    assert.equal(proposeBreak(c, local('2026-10-21T10:31').getTime(), now), null);
+});
+
+test('new break: on a running card, not past now', () => {
+    const now = local('2026-10-21T10:04').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00' });
+    const p = proposeBreak(c, local('2026-10-21T10:02').getTime(), now);
+    assert.ok(p.endMs <= now, 'ends by now');
 });
 
 test('edit form: unchanged fields keep their seconds', () => {

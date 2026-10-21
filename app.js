@@ -7,9 +7,9 @@ import {
     addDays, assert, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, cardOverlapsRange,
     dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
     getDayStart, getWeekRange, getWeekStart, isSameDay, normalizeCard, parseLocalDate,
-    readEditForm, snapMs, toLocalDatetimeInput, workedMs,
+    addBreak, readEditForm, toLocalDatetimeInput, workedMs,
 } from './core.js';
-import { attachTimelineDrag, isDragging, renderTimeline, updateRunningSpans } from './timeline.js';
+import { attachTimeline, isDragging, renderTimeline, updateRunningSpans } from './timeline.js';
 import { mockEnabled } from './mockgraph.js';
 
 // Mock mode keeps its own keys, so it never disturbs a real session in another tab.
@@ -28,10 +28,8 @@ const BACKGROUND_REFRESH_MS = 30 * 1000;
 const LIVE_TICK_MS = 1000;
 const IDLE_RETURN_TO_THIS_WEEK_MS = 60 * 60 * 1000;
 const EXTEND_TO_NOW_LAG_MS = 30 * 1000;
-const DEFAULT_BREAK_MS = 10 * 60 * 1000;
 const TIMECARD_PAGE_SIZE = 250;
 const TIMECARD_PAGES_MAX = 20;
-const BREAK_ROWS_MAX = 20;
 
 const state = {
     teams: [],
@@ -55,7 +53,7 @@ const el = Object.fromEntries([
     'btn-week-prev', 'btn-week-next', 'week-picker', 'week-range-label', 'week-total', 'btn-clock',
     'team-picker-panel', 'team-picker-msg', 'team-picker-select', 'btn-team-save', 'status-panel',
     'timecards-loading', 'weeks', 'drag-tooltip', 'edit-modal', 'edit-clock-in', 'edit-clock-out',
-    'edit-notes', 'breaks-edit', 'btn-add-break', 'btn-edit-save', 'btn-edit-cancel', 'confirm-modal',
+    'edit-notes', 'breaks-edit', 'btn-edit-save', 'btn-edit-cancel', 'confirm-modal',
     'confirm-title', 'confirm-msg', 'confirm-beta-warn', 'btn-confirm-ok', 'btn-confirm-cancel',
 ].map(id => [id.replace(/-(.)/g, (_, c) => c.toUpperCase()), $(id)]));
 
@@ -101,7 +99,6 @@ function bindEvents() {
     el.btnClock.addEventListener('click', () => void clockAction(el.btnClock.dataset.action));
     el.btnEditCancel.addEventListener('click', closeEditDialog);
     el.btnEditSave.addEventListener('click', () => void saveEditDialog());
-    el.btnAddBreak.addEventListener('click', () => addBreakRow(defaultBreak()));
     el.btnConfirmOk.addEventListener('click', () => closeConfirm(true));
     el.btnConfirmCancel.addEventListener('click', () => closeConfirm(false));
     document.addEventListener('keydown', event => {
@@ -113,10 +110,12 @@ function bindEvents() {
     document.addEventListener('keydown', noteActivity, true);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) onBackgroundTick(); });
     el.weeks.addEventListener('click', onWeeksClick);
-    attachTimelineDrag(el.weeks, {
+    attachTimeline(el.weeks, {
         cardById: id => state.cards.find(card => card.id === id),
         onSelect: highlightCard,
         onCommit: (card, movedMs) => void saveCard(card, `Moved to ${timeFormat.format(movedMs)}`),
+        onAddBreak: (card, proposal) => void saveCard(addBreak(card, proposal),
+            `Break added ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`),
         // A saved drag is drawn by the read-back after the save; drawing now would snap it back.
         onEnd: committed => { if (!committed) render(); },
         tooltip: {
@@ -593,8 +592,8 @@ function closeEditDialog() {
     show(el.editModal, false);
 }
 
+// The dialog edits and removes a card's breaks; new ones are added on the timeline.
 function addBreakRow({ breakId = '', start = '', end = '' }) {
-    if (el.breaksEdit.children.length >= BREAK_ROWS_MAX) return;
     const row = document.createElement('div');
     row.className = 'break-edit-row';
     row.dataset.breakId = breakId;
@@ -604,16 +603,6 @@ function addBreakRow({ breakId = '', start = '', end = '' }) {
         <button type="button" class="btn btn-secondary btn-compact btn-icon" title="Remove break" aria-label="Remove break">✕</button>`;
     row.querySelector('button').addEventListener('click', () => row.remove());
     el.breaksEdit.appendChild(row);
-}
-
-// A new break: ten minutes in the middle of the card as the dialog has it, snapped to 5 minutes.
-function defaultBreak() {
-    const startMs = new Date(el.editClockIn.value).getTime();
-    const endMs = el.editClockOut.value ? new Date(el.editClockOut.value).getTime() : Date.now();
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return {};
-    const lengthMs = Math.min(DEFAULT_BREAK_MS, endMs - startMs);
-    const breakStartMs = snapMs(startMs + (endMs - startMs - lengthMs) / 2);
-    return { start: toLocalDatetimeInput(new Date(breakStartMs)), end: toLocalDatetimeInput(new Date(breakStartMs + lengthMs)) };
 }
 
 async function saveEditDialog() {

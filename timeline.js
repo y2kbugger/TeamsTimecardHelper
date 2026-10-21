@@ -1,8 +1,9 @@
 // One day's timeline: cards and their breaks drawn across the day (24 hours, or 23 or 25 on
-// daylight saving days), and dragging their edges. A drag previews the snapped, clamped time and
-// saves only on release; Escape cancels. While a drag runs the app holds back re-renders, so a
-// background refresh cannot pull the block from under the pointer.
-import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds } from './core.js';
+// daylight saving days), dragging their edges, and adding breaks. A drag previews the snapped,
+// clamped time and saves only on release; Escape cancels. While a drag runs the app holds back
+// re-renders, so a background refresh cannot pull the block from under the pointer. Hovering a
+// card shows a ghost of the break a click would add there.
+import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, proposeBreak } from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
 const BLOCK_WIDTH_MIN_PERCENT = 0.15;
@@ -11,6 +12,9 @@ const hourFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 let drag = null; // the drag in progress, see startDrag
+// { element, cardId, proposal } while a new break is offered. Never during a drag, so the click
+// that follows a drag's release finds none and adds nothing.
+let ghost = null;
 
 export function isDragging() {
     return drag !== null;
@@ -120,18 +124,59 @@ export function updateRunningSpans(root, cardsById, nowMs) {
 
 // ── Dragging ────────────────────────────────────────────────────────────────
 
-// handlers: { cardById(id), onCommit(updatedCard, movedMs), onEnd(), onSelect(cardId), tooltip }
-export function attachTimelineDrag(root, handlers) {
+// handlers: { cardById(id), onCommit(updatedCard, movedMs), onEnd(committed), onSelect(cardId),
+//             onAddBreak(card, { startMs, endMs }), tooltip }
+export function attachTimeline(root, handlers) {
     root.addEventListener('pointerdown', event => {
         const span = event.target.closest('.tc-block, .break-overlay');
         if (!span) return;
         handlers.onSelect(span.dataset.cardId);
         const handle = event.target.closest('.resize-handle');
-        if (handle && event.button === 0) startDrag(event, span, handle, handlers);
+        if (handle && event.button === 0) {
+            hideGhost();
+            startDrag(event, span, handle, handlers);
+        }
+    });
+    root.addEventListener('pointermove', event => updateGhost(event, handlers));
+    root.addEventListener('pointerleave', hideGhost);
+    root.addEventListener('click', event => {
+        const block = event.target.closest('.tc-block');
+        if (!block || !ghost || ghost.cardId !== block.dataset.cardId) return;
+        const card = handlers.cardById(ghost.cardId);
+        const { proposal } = ghost;
+        hideGhost();
+        if (card) handlers.onAddBreak(card, proposal);
     });
     window.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && drag) endDrag(false);
+        if (event.key !== 'Escape') return;
+        if (drag) endDrag(false);
+        hideGhost();
     });
+}
+
+// The break a click would add, under the pointer on a card's block (not on a handle or a break).
+function updateGhost(event, handlers) {
+    const block = drag ? null : event.target.closest('.tc-block');
+    const card = block && !event.target.closest('.resize-handle') && handlers.cardById(block.dataset.cardId);
+    if (!card) return hideGhost();
+    const axis = block.parentElement;
+    const day = { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
+    const rect = axis.getBoundingClientRect();
+    const atMs = day.dayStartMs + ((event.clientX - rect.left) / rect.width) * (day.dayEndMs - day.dayStartMs);
+    const proposal = proposeBreak(card, atMs, Date.now());
+    if (!proposal) return hideGhost();
+    if (!ghost) ghost = { element: document.createElement('div') };
+    const { element } = ghost;
+    element.className = 'break-ghost';
+    element.title = `+ break ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`;
+    place(element, day, proposal.startMs, proposal.endMs);
+    if (element.parentElement !== axis) axis.appendChild(element);
+    Object.assign(ghost, { cardId: card.id, proposal });
+}
+
+function hideGhost() {
+    ghost?.element.remove();
+    ghost = null;
 }
 
 function startDrag(event, element, handle, handlers) {

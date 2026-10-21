@@ -384,6 +384,47 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
+        name: 'add-break-at-the-ghost',
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 22));
+            const ghost = app.$('.break-ghost');
+            check(ghost?.title.includes('11:15') && ghost.title.includes('11:25'), `the ghost offers 11:15-11:25: ${ghost?.title}`);
+            block.click();
+            await waitFor('the new break', () => card().breaks.length === 2);
+            const added = card().breaks.find(b => localTime(b.start.dateTime) !== '10:30');
+            check(`${localTime(added.start.dateTime)}-${localTime(added.end.dateTime)}` === '11:15-11:25', `added 11:15-11:25: ${JSON.stringify(added)}`);
+            await waitFor('the break on the timeline', () => app.$$(`.break-overlay[data-card-id="${block.dataset.cardId}"]`).length === 2);
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'no-ghost-over-a-break',
+        run: () => withApp(async app => {
+            const { id } = seededBlock(app);
+            const overlay = app.$(`.break-overlay[data-card-id="${id}"]`);
+            app.pointer('pointermove', overlay, app.xAt(overlay.parentElement, 10, 35));
+            check(!app.$('.break-ghost'), 'no ghost on an existing break');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'the-click-ending-a-drag-adds-no-break',
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.grab(block, 'end', 12, 30);
+            // Over the block itself, where a ghost would be offered were it not mid-drag.
+            app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 30));
+            check(!app.$('.break-ghost'), 'no ghost during a drag');
+            app.pointer('pointerup', block, 0);
+            block.click();
+            await waitFor('the drag saved', () => localTime(card().clockOutEvent.dateTime) === '11:30');
+            await app.settled('the reload');
+            check(card().breaks.length === 1, 'still one break');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
         name: 'expired-session-finishes-the-click',
         run: () => withApp(async app => {
             sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');

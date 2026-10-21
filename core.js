@@ -226,6 +226,33 @@ export function applyDrag(card, breakIndex, edge, targetMs, nowMs = Date.now()) 
     return { movedMs, card: buildUpdatedCard(card, { breaks }) };
 }
 
+// ── Adding a break ──────────────────────────────────────────────────────────
+
+export const BREAK_DEFAULT_MS = 10 * 60 * 1000;
+
+// A new break around atMs: BREAK_DEFAULT_MS long (shorter in a smaller gap), snapped, inside the
+// card and inside the gap between its breaks that holds atMs. Null on a break, outside the card,
+// or in a gap shorter than one snap.
+export function proposeBreak(card, atMs, nowMs = Date.now()) {
+    const startMs = cardStartMs(card);
+    const endMs = cardEndMs(card, nowMs);
+    if (!(atMs > startMs && atMs < endMs)) return null;
+    const spans = breakSpans(card, nowMs);
+    if (spans.some(span => atMs >= span.startMs && atMs <= span.endMs)) return null;
+    const gapStartMs = Math.max(startMs, ...spans.filter(span => span.endMs < atMs).map(span => span.endMs));
+    const gapEndMs = Math.min(endMs, ...spans.filter(span => span.startMs > atMs).map(span => span.startMs));
+    const lengthMs = Math.floor(Math.min(BREAK_DEFAULT_MS, gapEndMs - gapStartMs) / SNAP_MS) * SNAP_MS;
+    if (lengthMs < SNAP_MS) return null;
+    const breakStartMs = clamp(snapMs(atMs - lengthMs / 2), gapStartMs, gapEndMs - lengthMs);
+    return { startMs: breakStartMs, endMs: breakStartMs + lengthMs };
+}
+
+export function addBreak(card, { startMs, endMs }) {
+    assert(startMs < endMs, 'a break ends after it starts');
+    const added = { breakId: undefined, start: { dateTime: new Date(startMs).toISOString() }, end: { dateTime: new Date(endMs).toISOString() } };
+    return buildUpdatedCard(card, { breaks: [...card.breaks, added] });
+}
+
 // ── The edit dialog ─────────────────────────────────────────────────────────
 
 // A datetime-local value, or the original timestamp when the value is unchanged: the input has

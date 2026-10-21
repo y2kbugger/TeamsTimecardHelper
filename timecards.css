@@ -98,6 +98,33 @@ body.is-dragging { cursor: ew-resize; user-select: none }
   border-radius: 4px;
   opacity: .92;
 }
+.tc-block:not(.is-dragging) { cursor: copy }
+.break-ghost {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  background: rgba(240, 168, 67, .28);
+  border: 1px dashed var(--warn);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.break-ghost::after {
+  content: attr(title);
+  position: absolute;
+  bottom: calc(100% + 12px);
+  padding: 2px 7px;
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font: 600 .7rem var(--mono);
+  white-space: nowrap;
+}
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
 .is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
 
