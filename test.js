@@ -230,6 +230,7 @@ async function waitFor(describe, predicate, timeoutMs = 4000) {
 // A fresh app on the seeded mock data, showing this week, already past its first render.
 async function openApp({ beforeLoad = () => { } } = {}) {
     seedMockDb();
+    sessionStorage.removeItem(auth.MOCK_EXPIRED_KEY);
     sessionStorage.removeItem(STORAGE_KEYS.selectedWeek);
     sessionStorage.removeItem(STORAGE_KEYS.lastActivity);
     sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
@@ -379,6 +380,37 @@ const flowTests = [
             await waitFor('the row to go', () => !app.$(`.tc-row[data-card-id="${cardId}"]`));
             check(!mockCards().some(c => c.id === cardId), 'the backend card is gone');
             return { cardId };
+        }),
+    },
+    {
+        name: 'flow-expired-session-finishes-the-click',
+        mode: 'mock',
+        run: () => withApp(async app => {
+            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
+            const cardsBefore = mockCards().length;
+            app.click('#btn-clock');
+            await waitFor('the session bar', () => app.$('#session-bar button'));
+            check(mockCards().length === cardsBefore, 'nothing happens until signed in');
+            check(app.$('#btn-clock').disabled, 'the clicked button waits');
+            app.click('#session-bar button');
+            await waitFor('Clock Out after signing in', () => app.clockLabel() === 'Clock Out');
+            check(!app.$('#session-bar'), 'the bar is gone');
+            check(openMockCard(), 'the clock-in reached the backend');
+            return { cards: mockCards().length };
+        }),
+    },
+    {
+        name: 'flow-expired-session-shows-on-return',
+        mode: 'mock',
+        run: () => withApp(async app => {
+            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
+            app.doc.dispatchEvent(new Event('visibilitychange'));
+            await waitFor('the session bar without any click', () => app.$('#session-bar'));
+            check(app.doc.body.classList.contains('session-expired'), 'the stale data is marked');
+            app.click('#session-bar button');
+            await waitFor('the bar to go', () => !app.$('#session-bar'));
+            check(!app.doc.body.classList.contains('session-expired'), 'the mark goes with the bar');
+            return {};
         }),
     },
     {
@@ -631,7 +663,5 @@ function bindActions() {
     }
 }
 
-if (!auth.isPopupContext()) {
-    bindActions();
-    void runSuite();
-}
+bindActions();
+void runSuite();

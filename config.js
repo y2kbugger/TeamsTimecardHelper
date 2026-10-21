@@ -7,4 +7,7 @@ export const config = Object.freeze({
     ]),
     appPagePath: './index.html',
     loginPagePath: './login.html',
+    // Both must be registered redirect URIs of the app (Azure portal, Single-page application),
+    // on localhost:8999 and on the production host.
+    authDonePagePath: './auth-done.html',
 });

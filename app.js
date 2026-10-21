@@ -126,7 +126,7 @@ bindEvent($('btn-add-break-edit'), 'click', addBreakRow);
 bindEvent($('btn-confirm-cancel'), 'click', () => closeConfirm(false));
 bindEvent($('btn-confirm-ok'), 'click', () => closeConfirm(true));
 
-if (document.body.dataset.page === 'app' && !auth.isPopupContext()) {
+if (document.body.dataset.page === 'app') {
     void boot();
 }
 
