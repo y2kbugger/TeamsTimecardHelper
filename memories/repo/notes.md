@@ -1,6 +1,0 @@
-- Toolbar state now lives in two buttons: `#btn-clock` and `#btn-break`. The separate state badge is removed, and when the user is on break the clock button is disabled and labeled `On Break` until the break is ended.
-- Auth refresh now retries one Graph 401/claims-style failure with `forceRefresh`, then falls back to interactive re-auth instead of leaving the app stuck on the current page.
-- The selected week lives in `sessionStorage` and holds only while the user is active: after an hour without a click or key (a new sign-in, a tab left open over the weekend) the app returns to the current week. So Monday morning opens on the new week.
-- Week and day boundaries are calendar arithmetic (`addDays`), never `+ n * 24h`: daylight saving days are 23 or 25 hours, and 24h steps once made "next week" stick on the fall-back week. The `week-range-calendar-days` self-test covers it.
-- The toolbar's active card comes from the current week even when another week is selected; `refreshTimeCards` fetches both.
-- `auth.signOut()` is local-only by default: it clears this app's MSAL/browser state and returns to login without calling Microsoft logout for the broader account session.
