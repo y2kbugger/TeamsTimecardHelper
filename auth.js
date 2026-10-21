@@ -118,12 +118,14 @@ export async function signOut({ navigateToLogin = true } = {}) {
 
 // ── Expired session ─────────────────────────────────────────────────────────
 
+const EXPIRED_MESSAGE = 'Your session expired, so what is shown may be out of date. Sign in to refresh it; what you were doing will finish.';
+
 // Resolves once the user has signed in again through the bar.
 function waitForSignIn() {
     if (!reauth) {
         let resolve;
         reauth = { promise: new Promise(r => { resolve = r; }), resolve };
-        renderSessionBar('Your session expired, so what is shown may be out of date. Sign in to refresh it; what you were doing will finish.');
+        renderSessionBar(EXPIRED_MESSAGE);
         document.body.classList.add('session-expired');
     }
     return reauth.promise;
@@ -139,7 +141,10 @@ function renderSessionBar(message) {
     }
     bar.innerHTML = `<span>${escHtml(message)}</span><button type="button" class="btn btn-warn">Sign in</button>`;
     // Called straight from the click with no await before it, so the popup counts as user-opened.
-    bar.querySelector('button').addEventListener('click', () => void signInAgain());
+    bar.querySelector('button').addEventListener('click', event => {
+        event.currentTarget.disabled = true; // one popup at a time; a failure redraws the bar
+        void signInAgain();
+    });
 }
 
 async function signInAgain() {
@@ -155,7 +160,7 @@ async function signInAgain() {
             await msalInstance.acquireTokenRedirect({ scopes: config.scopes, loginHint: currentAccount?.username, redirectUri: LOGIN_URI });
             return;
         }
-        if (!popupCancelled(error)) renderSessionBar(`Sign-in failed: ${error.message}. Try again.`);
+        renderSessionBar(popupCancelled(error) ? EXPIRED_MESSAGE : `Sign-in failed: ${error.message}. Try again.`);
         return;
     }
     $('session-bar')?.remove();
@@ -175,7 +180,7 @@ async function acquireToken({ forceRefresh = false } = {}) {
         } else if (currentAccount) {
             try {
                 // Locally, `sessionStorage.dev_no_iframe_renewal` stops renewal at the refresh token, as
-                // on the owner's unmanaged PC, where the hidden-iframe renewal cannot get a token either.
+                // on an unmanaged PC, where the hidden-iframe renewal cannot get a token either.
                 const noIframe = location.hostname === 'localhost' && sessionStorage.getItem('dev_no_iframe_renewal');
                 const response = await msalInstance.acquireTokenSilent({
                     scopes: config.scopes, account: currentAccount, forceRefresh,
