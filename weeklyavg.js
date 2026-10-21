@@ -74,7 +74,8 @@ function buildFeatureUi() {
     document.querySelector('#header-actions').appendChild(triggerButton);
 
     modalOverlay = document.createElement('div');
-    modalOverlay.className = 'modal-overlay hidden';
+    modalOverlay.className = 'modal-overlay';
+    modalOverlay.hidden = true;
     modalOverlay.id = 'weekly-avg-modal';
     modalOverlay.innerHTML = `
         <div class="modal weekly-avg-modal-shell" role="dialog" aria-modal="true" aria-labelledby="weekly-avg-title">
@@ -166,7 +167,7 @@ function openModal() {
     previousDocumentOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = 'hidden';
     document.documentElement.style.overflow = 'hidden';
-    modalOverlay.classList.remove('hidden');
+    modalOverlay.hidden = false;
     startInput.focus();
     void refreshFromAppState(appState);
 }
@@ -175,7 +176,7 @@ function closeModal() {
     if (!isOpen) return;
     isOpen = false;
     triggerButton.setAttribute('aria-expanded', 'false');
-    modalOverlay.classList.add('hidden');
+    modalOverlay.hidden = true;
     document.body.style.overflow = previousBodyOverflow;
     document.documentElement.style.overflow = previousDocumentOverflow;
     triggerButton.focus();

@@ -18,12 +18,16 @@ export function toast(message, type = 'info') {
     setTimeout(() => el.remove(), 4000);
 }
 
+let errorBannerTimer = 0;
+
+// The newest error shows its full time; an older one's timer does not cut it short.
 export function showError(message) {
     const banner = $('error-banner');
     if (!banner) return;
     banner.textContent = message;
     banner.style.display = 'block';
-    setTimeout(() => { banner.style.display = 'none'; }, 8000);
+    clearTimeout(errorBannerTimer);
+    errorBannerTimer = setTimeout(() => { banner.style.display = 'none'; }, 8000);
 }
 
 // ── Dev server side channel (devserver.py): only on localhost, never in production ──

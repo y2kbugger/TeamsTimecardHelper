@@ -101,7 +101,6 @@ input, textarea, select {
   background: rgba(5, 6, 10, .7);
   backdrop-filter: blur(2px);
 }
-.modal-overlay.hidden { display: none }
 .modal {
   width: min(500px, 96vw);
   max-height: 88vh;
