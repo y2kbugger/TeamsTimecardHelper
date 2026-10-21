@@ -4,7 +4,7 @@
 import * as auth from './auth.js';
 import { $, escHtml, toast, showError } from './ui.js';
 import {
-    addDays, assert, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, cardOverlapsRange,
+    addDays, assert, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, filterCardsForWeek,
     dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
     getDayStart, getWeekRange, getWeekStart, isSameDay, normalizeCard, parseLocalDate,
     addBreak, readEditForm, toLocalDatetimeInput, workedMs,
@@ -42,6 +42,7 @@ const state = {
     highlightedCardId: null,
     renderHeld: false, // a render was asked for during a drag
     busyCount: 0,
+    changesInFlight: 0, // writes not yet read back; until then the cards held are out of date
     weekLoad: null, // { key, promise } while a week loads
     loadCount: 0, // week loads started; only the newest one's answer is shown
     editCard: null,
@@ -111,7 +112,8 @@ function bindEvents() {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) onBackgroundTick(); });
     el.weeks.addEventListener('click', onWeeksClick);
     attachTimeline(el.weeks, {
-        cardById: id => state.cards.find(card => card.id === id),
+        // None while a change is on its way: a drag of the card as it was would undo the change.
+        cardById: id => (state.changesInFlight ? undefined : state.cards.find(card => card.id === id)),
         onSelect: highlightCard,
         onCommit: (card, movedMs) => void saveCard(card, `Moved to ${timeFormat.format(movedMs)}`),
         onAddBreak: (card, proposal) => void saveCard(addBreak(card, proposal),
@@ -189,9 +191,9 @@ async function fetchClockedInBetween(teamId, rangeStart, rangeEndInclusive) {
 
 // The week of `weekInput` (a date or 'YYYY-MM-DD'; this week when absent).
 export async function fetchWeekTimeCards(teamId, weekInput = null) {
-    const { weekStart, weekEndExclusive, weekEndInclusive } = getWeekRange(parseLocalDate(weekInput) || new Date());
+    const { weekStart, weekEndInclusive } = getWeekRange(parseLocalDate(weekInput) || new Date());
     const result = await fetchClockedInBetween(teamId, weekStart, weekEndInclusive);
-    const cards = result.cards.filter(card => cardOverlapsRange(card, weekStart.getTime(), weekEndExclusive.getTime()));
+    const cards = filterCardsForWeek(result.cards, weekStart);
     return { ...result, weekStart, cards, activeCard: findActiveCard(cards) };
 }
 
@@ -346,6 +348,8 @@ function render() {
     }
     state.renderHeld = false;
     assert(state.team && state.weekStart, 'a week of a team to render');
+    // Another week's cards are never drawn under this week's dates; its load renders when done.
+    if (state.cardsWeekKey !== weekKey(state.weekStart)) return;
     syncWeekControls();
     renderClockButton();
     const nowMs = Date.now();
@@ -357,6 +361,11 @@ function render() {
     showOnly(el.weeks);
     renderTotals(days);
     highlightCard(state.highlightedCardId);
+    if (state.changesInFlight) disableActions();
+}
+
+function disableActions() {
+    for (const button of [el.btnClock, ...el.weeks.querySelectorAll('button')]) button.disabled = true;
 }
 
 function renderTotals(days) {
@@ -489,20 +498,28 @@ function onWeeksClick(event) {
     void actions[button.dataset.action]?.();
 }
 
-// Runs a change, then reads the week back. The button stays disabled until both are done.
+// Runs a change, then reads the week back. Until both are done every action is disabled, so no
+// second change is built from the cards as they were before this one.
 async function change(button, successMessage, request) {
+    state.changesInFlight += 1;
+    document.body.classList.add('is-saving');
     if (button) button.disabled = true;
+    disableActions();
     try {
         await graph(request);
         toast(successMessage, 'success');
+        await loadWeek({ force: true });
+        return true;
     } catch (error) {
         toast(error.message, 'error');
-        render();
-        if (button) button.disabled = false;
         return false;
+    } finally {
+        state.changesInFlight -= 1;
+        assert(state.changesInFlight >= 0, 'changes in flight never negative');
+        document.body.classList.toggle('is-saving', state.changesInFlight > 0);
+        if (button) button.disabled = false;
+        render();
     }
-    await loadWeek({ force: true });
-    return true;
 }
 
 const CLOCK_ACTIONS = {

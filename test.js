@@ -384,6 +384,26 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
+        name: 'no-second-change-until-the-first-is-read-back',
+        // A second drag built from the card as it was would put the first one's edge back.
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.grab(block, 'end', 12, 30);
+            app.pointer('pointerup', block, 0);
+            check(app.$('#btn-clock').disabled, 'the clock button waits for the save');
+            const start = block.querySelector('.resize-handle[data-edge="start"]');
+            app.pointer('pointerdown', start, start.getBoundingClientRect().left);
+            app.pointer('pointermove', start, app.xAt(block.parentElement, 8, 30));
+            check(!app.$('.is-dragging'), 'no second drag while the first is saving');
+            app.pointer('pointerup', start, 0);
+            await app.settled('the save and its read-back');
+            check(localTime(card().clockOutEvent.dateTime) === '12:30', `the first change holds: ${card().clockOutEvent.dateTime}`);
+            check(localTime(card().clockInEvent.dateTime) === '9:00', 'the second never happened');
+            check(!app.$('#btn-clock').disabled, 'the clock button is back');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
         name: 'ctrl-click-adds-the-ghost-break',
         run: () => withApp(async app => {
             const { block, card } = seededBlock(app);

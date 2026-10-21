@@ -146,7 +146,8 @@ export function attachTimeline(root, handlers) {
     root.addEventListener('pointerleave', hideGhost);
     root.addEventListener('click', event => {
         const block = event.target.closest('.tc-block');
-        if (!event.ctrlKey || !block || !ghost || ghost.cardId !== block.dataset.cardId) return;
+        // Only the ghost on show: a re-render since it was offered leaves it detached and stale.
+        if (!event.ctrlKey || !block || !ghost?.element.isConnected || ghost.cardId !== block.dataset.cardId) return;
         const card = handlers.cardById(ghost.cardId);
         const { proposal } = ghost;
         hideGhost();

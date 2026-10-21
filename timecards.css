@@ -41,6 +41,7 @@
   pointer-events: none;
 }
 body.is-dragging { cursor: ew-resize; user-select: none }
+body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: progress }
 
 .team-picker-card { max-width: 560px; margin: 0 auto; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px }
 .team-picker-card p { margin-bottom: 14px; line-height: 1.5 }
