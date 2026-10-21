@@ -82,20 +82,17 @@ body.is-dragging { cursor: ew-resize; user-select: none }
 .tc-block {
   display: flex;
   align-items: center;
-  overflow: hidden;
   background: linear-gradient(180deg, #7682ff, #5563ea);
-  border-radius: 6px;
   box-shadow: 0 2px 8px rgba(40, 50, 160, .35);
 }
 .tc-block.is-running { animation: running 2.4s ease-in-out infinite }
 @keyframes running { 50% { box-shadow: 0 0 0 3px rgba(118, 130, 255, .35) } }
-.tc-label { padding: 0 7px; color: #fff; font-size: .66rem; font-weight: 600; white-space: nowrap; pointer-events: none }
+.tc-label { overflow: hidden; padding: 0 7px; color: #fff; font-size: .66rem; font-weight: 600; white-space: nowrap; pointer-events: none }
 .break-overlay {
   z-index: 2;
   top: 9px;
   bottom: 9px;
   background: repeating-linear-gradient(135deg, #f0a843 0 4px, #d68f2d 4px 8px);
-  border-radius: 4px;
   opacity: .92;
 }
 .tc-block:not(.is-dragging) { cursor: copy }
@@ -110,7 +107,6 @@ body.is-dragging { cursor: ew-resize; user-select: none }
   overflow: visible;
   background: rgba(240, 168, 67, .28);
   border: 1px dashed var(--warn);
-  border-radius: 4px;
   pointer-events: none;
 }
 .break-ghost::after {
@@ -128,11 +124,11 @@ body.is-dragging { cursor: ew-resize; user-select: none }
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
 .is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
 
-/* Thin to look at, wide to grab. */
-.resize-handle { position: absolute; top: 0; bottom: 0; z-index: 1; width: 3px; background: rgba(255, 255, 255, .85); cursor: ew-resize }
+/* A thin line standing out above and below its bar: precise to look at, wide to grab. */
+.resize-handle { position: absolute; top: -5px; bottom: -5px; z-index: 1; width: 2px; background: rgba(255, 255, 255, .9); cursor: ew-resize }
 .resize-handle::before { content: ""; position: absolute; inset: 0 -5px }
-.resize-handle[data-edge="start"] { left: 0 }
-.resize-handle[data-edge="end"] { right: 0 }
+.resize-handle[data-edge="start"] { left: -1px }
+.resize-handle[data-edge="end"] { right: -1px }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 
