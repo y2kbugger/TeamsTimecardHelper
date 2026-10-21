@@ -6,14 +6,23 @@ import {
     getDayStart, getWeekRange as getCalendarWeekRange, getWeekStart, groupByDay, isOpenCard, isSameDay,
     normalizeCard, parseLocalDate, snapMs, toLocalDatetimeInput, workedMs,
 } from './core.js';
+import { mockEnabled } from './mockgraph.js';
 
 export { buildProjectedTimelineUpdate, formatDateInputValue, formatDurationHms, workedMs };
 
-const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
-const SESSION_KEY_SELECTED_WEEK = 'tc_selected_week';
-const SESSION_KEY_LAST_ACTIVITY = 'tc_last_activity_at';
+// Mock mode keeps its own keys, so it never disturbs a real session in another tab.
+const STORAGE_PREFIX = mockEnabled ? 'mock_' : '';
+export const STORAGE_KEYS = Object.freeze({
+    selectedTeamId: `${STORAGE_PREFIX}tc_selected_team_id`,
+    selectedWeek: `${STORAGE_PREFIX}tc_selected_week`,
+    lastActivity: `${STORAGE_PREFIX}tc_last_activity_at`,
+    joinedTeams: `${STORAGE_PREFIX}tc_joined_teams`,
+});
+const SESSION_KEY_SELECTED_TEAM_ID = STORAGE_KEYS.selectedTeamId;
+const SESSION_KEY_SELECTED_WEEK = STORAGE_KEYS.selectedWeek;
+const SESSION_KEY_LAST_ACTIVITY = STORAGE_KEYS.lastActivity;
 const WEEK_RESET_IDLE_MS = 60 * 60 * 1000;
-const SESSION_CACHE_KEY_JOINED_TEAMS = 'tc_joined_teams';
+const SESSION_CACHE_KEY_JOINED_TEAMS = STORAGE_KEYS.joinedTeams;
 const DEFAULT_BREAK_DURATION_MS = 10 * 60 * 1000;
 const EXTEND_TO_NOW_LAG_MS = 30 * 1000;
 const CACHE_STALE_MS = 45 * 1000;

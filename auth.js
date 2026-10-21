@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { $, escHtml, toast, showError } from './ui.js';
+import { MOCK_ACCOUNT, mockEnabled, mockGraphFetch } from './mockgraph.js';
 
 const DEFAULT_AUTHORITY_TENANT = 'organizations';
 const INTERACTION_REQUIRED_CODES = new Set([
@@ -138,6 +139,10 @@ export async function initializeSession() {
 }
 
 async function initializeSessionInternal() {
+    if (mockEnabled) {
+        currentAccount = MOCK_ACCOUNT;
+        return { ready: true, authenticated: true, account: currentAccount };
+    }
     const c = getRuntimeConfig();
     const configKey = getConfigKey(c);
     if (!msalInstance || initializedConfigKey !== configKey) {
@@ -277,6 +282,7 @@ async function acquireToken({ forceRefresh = false } = {}) {
 }
 
 async function graphRequest(baseUrl, url, options, authRetry = true) {
+    if (mockEnabled) return mockGraphFetch(url.startsWith('http') ? url : `${baseUrl}${url}`, options);
     const token = await acquireToken({ forceRefresh: !authRetry });
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
     const headers = {

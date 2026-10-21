@@ -57,6 +57,7 @@ input,textarea,select{padding:7px 10px;background:var(--surface2);color:var(--te
 .test-result-fail{border-left-color:var(--danger)}
 .test-result-skip{border-left-color:var(--warn)}
 .test-result-running{border-left-color:var(--accent)}
+.test-app-frame{width:1280px;height:800px;border:1px solid var(--border)}
 .test-result-name,.test-result-body{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace}
 .test-result-name{font-size:.82rem;font-weight:600}
 .test-result-body{margin-top:8px;white-space:pre-wrap;font-size:.76rem;color:var(--text2)}

@@ -1,4 +1,3 @@
-- Static assets are cache-busted with query strings in index.html, login.html, and test.html. After changing common.css, timecards.css, app.js, auth.js, or test.js, bump the version suffix or the browser may keep using stale files.
 - Toolbar state now lives in two buttons: `#btn-clock` and `#btn-break`. The separate state badge is removed, and when the user is on break the clock button is disabled and labeled `On Break` until the break is ended.
 - Auth refresh now retries one Graph 401/claims-style failure with `forceRefresh`, then falls back to interactive re-auth instead of leaving the app stuck on the current page.
 - The selected week lives in `sessionStorage` and holds only while the user is active: after an hour without a click or key (a new sign-in, a tab left open over the weekend) the app returns to the current week. So Monday morning opens on the new week.

@@ -4,7 +4,7 @@
 
 - Keep this as a static app. Do not introduce a build step or install Node packages.
 - Code is split into native ES modules (no bundler). Browsers load them directly via `<script type="module">`. They will not load over `file://` — always use `serve.sh` (http://localhost:8999).
-- Node is acceptable for syntax checks only, such as `node --check`.
+- Node is for checks only: `node --check` and the built-in `node --test` runner, with no packages.
 - Prefer simpler DOM over decorative structure. Resize handles should stay square, thin, and minimal.
 - Keep structure split and simple:
   - `common.css` for shared styles
@@ -23,7 +23,12 @@
 ## Project Structure
 
 - `config.js`: hardcoded auth/runtime config (ES module, exports `config`)
-- `ui.js`: shared DOM helpers (`$`, `escHtml`, `toast`, `showError`)
+- `core.js`: pure logic (calendar math, card shapes and updates, worked time, the weekly average model). No DOM, storage or network; unit-tested in `tests/core.test.js`.
+- `ui.js`: shared DOM helpers (`$`, `escHtml`, `toast`, `showError`), and on localhost the side channel to `devserver.py`
+- `mockgraph.js`: an in-memory Graph backend for local work, on with `?mock` (see Validation)
+- `devserver.py` (run by `serve.sh`): static files served `no-store`, plus `POST /__agent/report` and `/__agent/log`, which write `.agent/` (ignored by git)
+- `agent-test.sh`: the text-only test run (see Validation)
+- `staticwebapp.config.json`: Azure Static Web Apps headers; `Cache-Control: no-cache` makes browsers revalidate every file, so there are no `?v=` cache-busting strings to bump
 - `login.html`: sign-in page (loads `auth.js` directly)
 - `index.html`: main app shell (loads `app.js`, which imports `auth.js` and `ui.js`)
 - `auth.js`: MSAL bootstrap, session restore, sign-in/out, Graph fetch helpers. Auto-boots only on the login page; the app and test pages drive their own boot via explicit imports.
@@ -37,15 +42,19 @@
 
 - Start from the narrowest deciding code path.
 - Prefer small, local edits and validate immediately after each substantive change.
-- Self-tests and Graph contract probes live in `test.js`. `app.js` contains no probe or test-only code; `test.js` shares code by calling real production functions on `window.timecardsApp`.
+- Self-tests and Graph contract probes live in `test.js`. `app.js` contains no probe or test-only code; `test.js` imports the production functions it needs from `app.js` and `core.js`.
 - Keep test pages browser-runnable without any build or package install.
-- Prefer visible test output over console-only debugging, since integrated browser auth state matters.
+- New logic that needs no DOM goes in `core.js` with a unit test.
 
 ## Validation Approach
 
-- Use `node --check` for JavaScript syntax validation.
-- Use the browser self-test page for auth status, Graph reachability, and feature probes.
-- Avoid adding dependencies just for validation.
+Three lanes, fastest first. Each prints or writes one condensed line per suite plus the failures.
+
+- `./agent-test.sh` (dev server running): unit tests with `node --test` (TZ is set to New York so daylight saving cases bite), then `test.html?mock` in headless Brave with a throwaway profile. About two seconds. Needs nobody signed in.
+- Mock browser tests (`test.html?mock`): the flow tests load the real app in an iframe against `mockgraph.js` and drive it: clock in/out, breaks, edits, deletes, week navigation. They never touch real timecards. `?mock` is kept per tab (`?mock=0` turns it off) and mock mode uses its own `mock_` storage keys.
+- Live tests (`test.html` in a signed-in browser): Graph contract probes against the real tenant. The page posts its condensed result to `.agent/browser-tests.txt`; read it with `./agent-test.sh live`.
+- Every page on localhost forwards uncaught errors, rejections and `console.error` to `.agent/browser.log`.
+- After switching dev servers once, hard-reload: files cached by an older server can outlive it.
 
 ## Verified Graph Notes
 
@@ -57,12 +66,7 @@
 - Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.
 
 ## TODO
-Agent tooling first; it is the flywheel for everything after it.
-- Agent test entrypoint: one text-only command or page mode that runs the tests and side-channels a condensed result (pass count, failures only) to a file the agent reads from the shell, so nobody has to look at the human-readable test page.
-- Dev server that never serves stale files (no-cache), so a reload always runs the code on disk.
-- Pure logic (week math, durations, card shapes, the weekly model) in a DOM-free module with `node --test` unit tests that run in the terminal in under a second.
-- A mock Graph backend (in-browser, opt-in) so the agent can exercise clock in/out, breaks, drags, edits and deletes without touching real timecards.
-- Then:
+- Drag tests: drive the timeline's resize handles in the mock flows (synthetic pointer events through interact.js), so drag jank can be fixed against a test.
 - Recover from an expired refresh token. On an unmanaged PC the refresh token lease is short (8 of 24 hours); a page left open over sleep fails every interaction until the user reloads and signs in again.
 - Full overhaul: less app code (JS and CSS), more tests, more DRY, more performant, less janky (drag glitches), and a little better looking.
 - add mobile css
