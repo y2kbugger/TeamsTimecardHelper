@@ -57,9 +57,7 @@
 - Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.
 
 ## TODO
-- We want to reduce conceptual overhead of fluff code, so therefore:
-    - Reduce css to 30% (character count)
-    - Reduce js to 60% (character count)
+- Full overhaul: less app code (JS and CSS), more tests, more DRY, more performant, less janky (drag glitches), and a little better looking.
 - add mobile css
-- resign in auto or token refresh 
+- Recover from an expired refresh token. On an unmanaged PC the refresh token lease is short (8 of 24 hours); a page left open over sleep fails every interaction until the user reloads and signs in again.
 
