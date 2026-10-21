@@ -4,7 +4,7 @@
 // re-renders, so a background refresh cannot pull the block from under the pointer. Hovering a
 // card shows a faint ghost of the break a Ctrl+click would add there; holding Ctrl arms it. A plain
 // click only selects, so a click meant to select never adds a break to a real timecard.
-import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, proposeBreak } from './core.js';
+import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, isLongCard, proposeBreak } from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
 const BLOCK_WIDTH_MIN_PERCENT = 0.15;
@@ -90,6 +90,10 @@ function appendCard(axis, day, card, nowMs) {
         title: `${timeFormat.format(startMs)} → ${card.clockOut ? timeFormat.format(endMs) : 'now'}`,
     });
     if (!card.clockOut) block.classList.add('is-running');
+    if (isLongCard(card, nowMs)) {
+        block.classList.add('is-long');
+        block.title += ' · over 16 hours: check its clock-out';
+    }
     if (startMs >= day.dayStartMs) {
         const label = document.createElement('span');
         label.className = 'tc-label';
@@ -120,6 +124,7 @@ export function updateRunningSpans(root, cardsById, nowMs) {
         const axis = element.parentElement;
         const day = { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
         const breakIndex = element.dataset.breakIndex;
+        if (breakIndex === undefined) element.classList.toggle('is-long', isLongCard(card, nowMs));
         const startMs = breakIndex === undefined
             ? cardStartMs(card)
             : new Date(card.breaks[Number(breakIndex)].start.dateTime).getTime();

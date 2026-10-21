@@ -6,7 +6,7 @@ import { $, escHtml, toast, showError } from './ui.js';
 import {
     addDays, assert, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, filterCardsForWeek,
     dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
-    getDayStart, getWeekRange, getWeekStart, isSameDay, normalizeCard, parseLocalDate,
+    getDayStart, getWeekRange, getWeekStart, isLongCard, isSameDay, normalizeCard, parseLocalDate,
     addBreak, readEditForm, toLocalDatetimeInput, workedMs,
 } from './core.js';
 import { attachTimeline, isDragging, renderTimeline, updateRunningSpans } from './timeline.js';
@@ -394,6 +394,7 @@ function renderDay(day, nowMs, latestId) {
     const section = document.createElement('section');
     section.className = 'day';
     section.classList.toggle('is-today', isSameDay(day.dayStart, new Date(nowMs)));
+    section.classList.toggle('is-past', day.dayEndMs <= nowMs);
     section.innerHTML = `
         <header class="day-header">
             <h2>${dateFormat.format(day.dayStart)}</h2>
@@ -411,6 +412,8 @@ function renderCard(card, isLatest, nowMs) {
     const item = document.createElement('div');
     item.className = 'card';
     item.dataset.cardId = card.id;
+    const isLong = isLongCard(card, nowMs);
+    item.classList.toggle('is-long', isLong);
     const clockOut = card.clockOut ? new Date(card.clockOut.dateTime) : null;
     // Only today's last card: extending an older one to now would add days of time.
     const canExtend = isLatest && clockOut && isSameDay(clockOut, new Date(nowMs)) && !state.activeCard;
@@ -420,6 +423,7 @@ function renderCard(card, isLatest, nowMs) {
             <span class="card-arrow">→</span>
             <span class="card-time">${clockOut ? timeFormat.format(clockOut) : '<span class="running-dot"></span>now'}</span>
             <span class="card-worked" data-worked="${escHtml(card.id)}">${formatDurationHms(workedMs(card, nowMs))}</span>
+            ${isLong ? '<span class="card-long" title="Longer than any real shift: check its clock-out">over 16 h</span>' : ''}
             ${card.notes?.content ? `<span class="card-notes" title="${escHtml(card.notes.content)}">${escHtml(card.notes.content)}</span>` : ''}
             <span class="card-actions">
                 ${canExtend ? '<button class="btn btn-secondary btn-compact" data-action="extend">Extend to now</button>' : ''}

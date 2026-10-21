@@ -55,6 +55,9 @@ uses Shifts.
 - The toolbar's clock state comes from the current week whatever week is shown.
 - A card past midnight is worked on in the day it clocked in: there an edge past midnight has its
   handle at the end of the axis; on the next day it is a faint ghost that takes no clicks.
+- The timeline's language, for cards and breaks alike: a white handle is a set time that drags; a
+  sheen flowing toward now is still running. A card over 16 hours is red (most likely a clock-out
+  forgotten overnight). Past days and card controls stay dim until pointed at.
 - Breaks are added on the timeline: hovering a card shows a ghost of a ten-minute break fitted
   into the free time under the pointer, and Ctrl+click adds it (a plain click only selects). The
   edit dialog changes and removes breaks.

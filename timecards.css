@@ -51,6 +51,8 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
 
 #weeks { padding: 8px 0 32px }
 .day { padding: 14px 20px 10px; border-bottom: 1px solid var(--border) }
+.day.is-past { opacity: .72; transition: opacity .15s }
+.day.is-past:is(:hover, :focus-within) { opacity: 1 }
 .day-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 22px }
 .day-header h2 { font-size: .85rem; font-weight: 600 }
 .day.is-today .day-header h2 { color: #b3b9ff }
@@ -86,8 +88,8 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
   background: linear-gradient(180deg, #7682ff, #5563ea);
   box-shadow: 0 2px 8px rgba(40, 50, 160, .35);
 }
-.tc-block.is-running { animation: running 2.4s ease-in-out infinite }
-@keyframes running { 50% { box-shadow: 0 0 0 3px rgba(118, 130, 255, .35) } }
+/* Over 16 hours: most likely a forgotten clock-out. */
+.tc-block.is-long { background: linear-gradient(180deg, #ff7f72, #d9473b); box-shadow: 0 2px 10px rgba(224, 92, 106, .5) }
 .tc-label { overflow: hidden; padding: 0 7px; color: #fff; font-size: .66rem; font-weight: 600; white-space: nowrap; pointer-events: none }
 .break-overlay {
   z-index: 2;
@@ -133,11 +135,29 @@ body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
 .resize-handle[data-edge="start"] { left: -1px }
 .resize-handle[data-edge="end"] { right: -1px }
 
+/* Still running, a card or a break alike: a sheen flows through it toward now, and it has no end
+   handle (its end is the now line). A span whose times are all set stands still. */
+.is-running::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .38), transparent) 0 0 / 90px 100% repeat-x;
+  animation: live 1.8s linear infinite;
+  pointer-events: none;
+}
+.break-overlay.is-running::before { background-image: linear-gradient(90deg, transparent, rgba(255, 236, 200, .7), transparent) }
+@keyframes live { to { background-position-x: 90px } }
+
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 
 .card-list { display: grid; gap: 6px; max-width: 600px; margin: 12px auto 0 }
 .card { padding: 7px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s }
 .card.is-highlighted { border-color: var(--success) }
+.card.is-long { box-shadow: inset 3px 0 0 var(--danger) }
+.card-long { padding: 1px 7px; background: rgba(224, 92, 106, .18); color: #ff9b94; border-radius: 999px; font-size: .7rem; font-weight: 600 }
+/* Controls stay quiet until their card is pointed at, so the eye goes to the timeline. */
+.card-actions, .break-row [data-action="delete-break"] { opacity: .4; transition: opacity .15s }
+.card:is(:hover, :focus-within, .is-highlighted) :is(.card-actions, [data-action="delete-break"]) { opacity: 1 }
 .card-row { display: flex; align-items: center; gap: 10px; font-size: .82rem }
 .card-arrow, .break-length { color: var(--text2) }
 .card-worked { min-width: 9ch; color: var(--text2); font: .8rem var(--mono) }

@@ -147,6 +147,13 @@ export function findActiveCard(cards) {
     return cards.filter(isOpenCard).sort((a, b) => getCardSortMs(b) - getCardSortMs(a))[0] || null;
 }
 
+// Longer than any real shift: most likely a clock-out forgotten overnight, to be fixed by hand.
+export const CARD_LONG_MS = 16 * 60 * 60 * 1000;
+
+export function isLongCard(card, nowMs = Date.now()) {
+    return cardEndMs(card, nowMs) - cardStartMs(card) > CARD_LONG_MS;
+}
+
 export function workedMs(card, nowMs = Date.now()) {
     if (!card.clockIn) return 0;
     const breakMs = card.breaks.reduce((sum, b) => (b.start ? sum + ((b.end ? ms(b.end) : nowMs) - ms(b.start)) : sum), 0);

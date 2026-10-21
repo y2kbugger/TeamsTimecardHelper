@@ -5,7 +5,7 @@ import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
-    getWorkSegments, buildDailyActuals, buildWeeklyModel,
+    getWorkSegments, isLongCard, buildDailyActuals, buildWeeklyModel,
     dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
 } from '../core.js';
 
@@ -223,6 +223,14 @@ test('update body omits clock-out on an open card and keeps break ids', () => {
     assert.equal(body.breaks[0].breakId, 'b0');
     assert.equal(body.breaks[0].end, undefined);
     assert.deepEqual(body.notes, { contentType: 'text', content: 'hi' });
+});
+
+test('a card over 16 hours is long, a running one too', () => {
+    const now = local('2026-10-22T09:00').getTime();
+    assert.equal(isLongCard(card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-22T01:00' }), now), false);
+    assert.equal(isLongCard(card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-22T01:01' }), now), true);
+    assert.equal(isLongCard(card({ clockIn: '2026-10-21T17:00' }), now), false);
+    assert.equal(isLongCard(card({ clockIn: '2026-10-21T16:59' }), local('2026-10-22T09:00').getTime() + 3600e3), true);
 });
 
 test('dragging an open card never clocks it out', () => {
