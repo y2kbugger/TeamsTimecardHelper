@@ -1,4 +1,4 @@
-import * as auth from './auth.js?v=20260504a';
+import * as auth from './auth.js';
 import {
     fetchJoinedTeams,
     fetchWeekTimeCards,
@@ -9,7 +9,7 @@ import {
     getWeekRange,
     formatDateInputValue,
 } from './app.js';
-import { $ } from './ui.js';
+import { $, reportToDevServer } from './ui.js';
 
 const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -442,14 +442,14 @@ async function runSuite() {
     }
 
     const context = { params, session, team: null, teams: null };
+    const startedAt = performance.now();
     let passed = 0;
-    let failed = 0;
-    let skipped = 0;
+    const problems = [];
 
     for (const test of requested) {
         const row = createResultRow(test.name);
         if (test.requiresAuth && !session.authenticated) {
-            skipped += 1;
+            problems.push(`SKIP ${test.name}: not signed in`);
             updateResultRow(row, 'skip', 'Skipped because the integrated browser is not signed in yet.');
             continue;
         }
@@ -458,15 +458,22 @@ async function runSuite() {
             const result = await test.run(context);
             passed += 1;
             updateResultRow(row, 'pass', result);
-            console.log(`[self-test] PASS ${test.name}`, result);
         } catch (error) {
-            failed += 1;
-            updateResultRow(row, 'fail', error?.message || String(error));
+            const message = error?.message || String(error);
+            problems.push(`FAIL ${test.name}: ${message}`);
+            updateResultRow(row, 'fail', message);
             console.error(`[self-test] FAIL ${test.name}`, error);
         }
     }
 
+    const failed = problems.filter(line => line.startsWith('FAIL')).length;
+    const skipped = problems.length - failed;
     renderSummary(`Requested ${requested.length} test(s). Passed: ${passed}. Failed: ${failed}. Skipped: ${skipped}. Authenticated: ${session.authenticated ? 'yes' : 'no'}.`);
+    const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+    reportToDevServer('browser-tests', [
+        `${failed ? 'FAIL' : 'ok'} browser tests: ${passed}/${requested.length} passed, ${failed} failed, ${skipped} skipped, signed in: ${session.authenticated ? 'yes' : 'no'}, ${seconds}s`,
+        ...problems,
+    ].join('\n'));
 }
 
 function bindActions() {

@@ -1,11 +1,12 @@
 import { showError } from './ui.js';
+import {
+    buildWeeklyModel, formatDateInputValue, formatDurationHms, formatSignedDuration, getDayStart, getWeekStart, parseLocalDate,
+} from './core.js';
 
 const STORAGE_KEY_START_DATE = 'tc_weekly_avg_start_date';
 const STORAGE_KEY_WEEKLY_HOURS = 'tc_weekly_avg_weekly_hours';
 const STORAGE_KEY_WORKDAYS = 'tc_weekly_avg_workdays';
 const DEFAULT_WEEKLY_HOURS = 25;
-const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_WORKDAYS = [1, 2, 3, 4, 5];
 const WORKDAY_OPTIONS = [
     { value: 0, shortLabel: 'S', fullLabel: 'Sunday' },
@@ -18,10 +19,7 @@ const WORKDAY_OPTIONS = [
 ];
 
 let fetchTimeCardsForDateRange = null;
-let formatDateInputValue = null;
-let formatDurationHms = null;
 let getCurrentAppState = null;
-let getWeekRange = null;
 
 let triggerButton = null;
 let modalOverlay = null;
@@ -39,7 +37,6 @@ let cardsCache = { key: '', cards: [] };
 let pendingCardsKey = '';
 let pendingCardsPromise = null;
 let isOpen = false;
-let eventsBound = false;
 let previousBodyOverflow = '';
 let previousDocumentOverflow = '';
 
@@ -49,18 +46,14 @@ const longDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'n
 const hoursFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
 export function initWeeklyAverageFeature(appApi) {
-    fetchTimeCardsForDateRange = appApi?.fetchTimeCardsForDateRange || fetchTimeCardsForDateRange;
-    formatDateInputValue = appApi?.formatDateInputValue || formatDateInputValue;
-    formatDurationHms = appApi?.formatDurationHms || formatDurationHms;
-    getCurrentAppState = appApi?.getCurrentAppState || getCurrentAppState;
-    getWeekRange = appApi?.getWeekRange || getWeekRange;
-    if (!fetchTimeCardsForDateRange || !formatDateInputValue || !formatDurationHms || !getCurrentAppState || !getWeekRange) {
-        throw new Error('Weekly average app API not initialized.');
+    ({ fetchTimeCardsForDateRange, getCurrentAppState } = appApi);
+    if (!fetchTimeCardsForDateRange || !getCurrentAppState) throw new Error('Weekly average app API not initialized.');
+    if (!triggerButton) {
+        buildFeatureUi();
+        bindEvents();
     }
-    if (!triggerButton || !modalOverlay) buildFeatureUi();
     syncInputsFromSettings();
     setWeeklyAverageTriggerVisible(Boolean(getCurrentAppState()?.team?.id));
-    bindEventsOnce();
 }
 
 export function setWeeklyAverageTriggerVisible(visible) {
@@ -71,12 +64,6 @@ export function setWeeklyAverageTriggerVisible(visible) {
 }
 
 function buildFeatureUi() {
-    const headerActions = document.querySelector('#header-actions');
-    if (!headerActions || !document.body) return;
-
-    document.querySelectorAll('.weekly-avg-trigger').forEach(element => element.remove());
-    document.querySelectorAll('#weekly-avg-modal').forEach(element => element.remove());
-
     triggerButton = document.createElement('button');
     triggerButton.type = 'button';
     triggerButton.className = 'btn btn-secondary weekly-avg-trigger';
@@ -84,7 +71,7 @@ function buildFeatureUi() {
     triggerButton.setAttribute('aria-haspopup', 'dialog');
     triggerButton.setAttribute('aria-expanded', 'false');
     triggerButton.style.display = 'none';
-    headerActions.appendChild(triggerButton);
+    document.querySelector('#header-actions').appendChild(triggerButton);
 
     modalOverlay = document.createElement('div');
     modalOverlay.className = 'modal-overlay hidden';
@@ -97,7 +84,7 @@ function buildFeatureUi() {
                     <p class="weekly-avg-headline">Weekly average</p>
                     <p class="weekly-avg-meta"></p>
                 </div>
-                <p class="weekly-avg-note">Expected time is split evenly across the selected workdays from the chosen start date. Days left off the schedule count as 00:00:00. Difference columns are actual minus expected, so negative means behind.</p>
+                <p class="weekly-avg-note">Expected time is split evenly across the selected workdays from the chosen start date, and counts only through today. Days left off the schedule count as 00:00:00. Difference columns are actual minus expected, so negative means behind.</p>
             </div>
             <div class="weekly-avg-toolbar">
                 <label class="weekly-avg-field">
@@ -162,10 +149,7 @@ function buildFeatureUi() {
     tableBodyEl = modalOverlay.querySelector('tbody');
 }
 
-function bindEventsOnce() {
-    if (eventsBound) return;
-    eventsBound = true;
-
+function bindEvents() {
     triggerButton.addEventListener('click', openModal);
     modalOverlay.addEventListener('click', event => {
         if (event.target === modalOverlay) closeModal();
@@ -174,11 +158,9 @@ function bindEventsOnce() {
     startInput.addEventListener('change', onSettingsChange);
     hoursInput.addEventListener('change', onSettingsChange);
     workdaysFieldset.addEventListener('change', onSettingsChange);
-    document.addEventListener('keydown', onDocumentKeyDown);
-}
-
-function onDocumentKeyDown(event) {
-    if (event.key === 'Escape' && isOpen) closeModal();
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && isOpen) closeModal();
+    });
 }
 
 function openModal() {
@@ -187,67 +169,40 @@ function openModal() {
     isOpen = true;
     triggerButton.setAttribute('aria-expanded', 'true');
     syncInputsFromSettings();
-    lockBackgroundScroll();
+    previousBodyOverflow = document.body.style.overflow;
+    previousDocumentOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
     modalOverlay.classList.remove('hidden');
     startInput.focus();
     void refreshFromAppState(appState);
 }
 
 function closeModal() {
-    if (!modalOverlay || !isOpen) return;
+    if (!isOpen) return;
     isOpen = false;
-    triggerButton?.setAttribute('aria-expanded', 'false');
+    triggerButton.setAttribute('aria-expanded', 'false');
     modalOverlay.classList.add('hidden');
-    unlockBackgroundScroll();
-    triggerButton?.focus();
-}
-
-function lockBackgroundScroll() {
-    previousBodyOverflow = document.body?.style.overflow || '';
-    previousDocumentOverflow = document.documentElement?.style.overflow || '';
-    if (document.body) document.body.style.overflow = 'hidden';
-    if (document.documentElement) document.documentElement.style.overflow = 'hidden';
-}
-
-function unlockBackgroundScroll() {
-    if (document.body) document.body.style.overflow = previousBodyOverflow;
-    if (document.documentElement) document.documentElement.style.overflow = previousDocumentOverflow;
+    document.body.style.overflow = previousBodyOverflow;
+    document.documentElement.style.overflow = previousDocumentOverflow;
+    triggerButton.focus();
 }
 
 function onSettingsChange() {
     const startDate = parseDateInput(startInput.value);
     const weeklyHours = parseWeeklyHours(hoursInput.value);
-    const workdays = readSelectedWorkdaysFromInputs();
-    if (!startDate || weeklyHours === null) {
-        syncInputsFromSettings();
-        return;
+    if (startDate && weeklyHours !== null) {
+        localStorage.setItem(STORAGE_KEY_START_DATE, formatDateInputValue(startDate));
+        localStorage.setItem(STORAGE_KEY_WEEKLY_HOURS, String(weeklyHours));
+        localStorage.setItem(STORAGE_KEY_WORKDAYS, readSelectedWorkdaysFromInputs().join(','));
     }
-    persistSettings(startDate, weeklyHours, workdays);
     syncInputsFromSettings();
     if (isOpen) void refreshFromAppState(getCurrentAppState());
 }
 
-function getDefaultStartDate() {
-    const now = new Date();
-    return new Date(now.getFullYear(), 0, 1);
-}
-
-function startOfDay(date) {
-    const value = new Date(date);
-    value.setHours(0, 0, 0, 0);
-    return value;
-}
-
-function addCalendarDays(date, days) {
-    const value = startOfDay(date);
-    value.setDate(value.getDate() + days);
-    return value;
-}
-
 function parseDateInput(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
-    const parsed = new Date(`${value}T00:00:00`);
-    return Number.isNaN(parsed.getTime()) ? null : startOfDay(parsed);
+    return parseLocalDate(value);
 }
 
 function parseWeeklyHours(value) {
@@ -256,81 +211,38 @@ function parseWeeklyHours(value) {
     return Number(parsed.toFixed(2));
 }
 
-function parseStoredWorkdays(value) {
-    if (typeof value !== 'string' || !value.trim()) return null;
-    const values = value.split(',')
-        .map(item => Number.parseInt(item, 10))
-        .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
-    return normalizeWorkdays(values);
+function normalizeWorkdays(values) {
+    const ordered = WORKDAY_OPTIONS.map(option => option.value).filter(day => values.includes(day));
+    return ordered.length ? ordered : DEFAULT_WORKDAYS.slice();
 }
 
 function readSelectedWorkdaysFromInputs() {
-    if (!workdaysFieldset) return DEFAULT_WORKDAYS.slice();
-    const values = Array.from(workdaysFieldset.querySelectorAll('input[type="checkbox"]:checked'))
-        .map(input => Number.parseInt(input.value, 10));
-    return normalizeWorkdays(values);
-}
-
-function normalizeWorkdays(values) {
-    const uniqueValues = Array.from(new Set((values || []).filter(day => Number.isInteger(day) && day >= 0 && day <= 6)));
-    const orderedValues = WORKDAY_OPTIONS
-        .map(option => option.value)
-        .filter(day => uniqueValues.includes(day));
-    return orderedValues.length ? orderedValues : DEFAULT_WORKDAYS.slice();
-}
-
-function countWorkdaysPerWeek(workdays) {
-    return Math.max(1, workdays.length);
-}
-
-function isWorkday(day, workdaysSet) {
-    return workdaysSet.has(day.getDay());
-}
-
-function describeWorkdays(workdays) {
-    const labels = WORKDAY_OPTIONS
-        .filter(option => workdays.includes(option.value))
-        .map(option => option.fullLabel);
-    return labels.length ? labels.join(', ') : 'Monday, Tuesday, Wednesday, Thursday, Friday';
-}
-
-function formatWeeklyHours(value) {
-    return hoursFmt.format(value);
+    return normalizeWorkdays(Array.from(workdaysFieldset.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(input => Number.parseInt(input.value, 10)));
 }
 
 function readSettings() {
-    const startDate = parseDateInput(localStorage.getItem(STORAGE_KEY_START_DATE) || '') || getDefaultStartDate();
+    const startDate = parseDateInput(localStorage.getItem(STORAGE_KEY_START_DATE) || '') || new Date(new Date().getFullYear(), 0, 1);
     const weeklyHours = parseWeeklyHours(localStorage.getItem(STORAGE_KEY_WEEKLY_HOURS) || '') ?? DEFAULT_WEEKLY_HOURS;
-    const workdays = parseStoredWorkdays(localStorage.getItem(STORAGE_KEY_WORKDAYS)) || DEFAULT_WORKDAYS.slice();
+    const storedWorkdays = (localStorage.getItem(STORAGE_KEY_WORKDAYS) || '').split(',').map(item => Number.parseInt(item, 10));
+    const workdays = normalizeWorkdays(storedWorkdays);
+    const workdaysDescription = WORKDAY_OPTIONS.filter(option => workdays.includes(option.value)).map(option => option.fullLabel).join(', ');
     return {
         startDate,
-        startKey: formatDateInputValue(startDate),
         weeklyHours,
         workdays,
-        workdaysSet: new Set(workdays),
-        workdaysDescription: describeWorkdays(workdays),
-        dailyTargetMs: (weeklyHours * HOUR_MS) / countWorkdaysPerWeek(workdays),
+        description: `${hoursFmt.format(weeklyHours)} h/week across ${workdaysDescription} from ${longDateFmt.format(startDate)}`,
     };
-}
-
-function persistSettings(startDate, weeklyHours, workdays) {
-    localStorage.setItem(STORAGE_KEY_START_DATE, formatDateInputValue(startDate));
-    localStorage.setItem(STORAGE_KEY_WEEKLY_HOURS, String(weeklyHours));
-    localStorage.setItem(STORAGE_KEY_WORKDAYS, normalizeWorkdays(workdays).join(','));
 }
 
 function syncInputsFromSettings() {
     const settings = readSettings();
-    if (startInput) startInput.value = settings.startKey;
-    if (hoursInput) hoursInput.value = String(settings.weeklyHours);
-    if (workdaysFieldset) {
-        const selected = new Set(settings.workdays);
-        workdaysFieldset.querySelectorAll('input[type="checkbox"]').forEach(input => {
-            const isChecked = selected.has(Number.parseInt(input.value, 10));
-            input.checked = isChecked;
-            input.parentElement?.classList.toggle('is-selected', isChecked);
-        });
-    }
+    startInput.value = formatDateInputValue(settings.startDate);
+    hoursInput.value = String(settings.weeklyHours);
+    workdaysFieldset.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.checked = settings.workdays.includes(Number.parseInt(input.value, 10));
+        input.parentElement.classList.toggle('is-selected', input.checked);
+    });
 }
 
 function setModalState({ headline = 'Weekly average', meta = '', empty = '', loading = false, showTable = false } = {}) {
@@ -340,77 +252,47 @@ function setModalState({ headline = 'Weekly average', meta = '', empty = '', loa
     emptyEl.textContent = empty;
     emptyEl.style.display = empty ? 'block' : 'none';
     tableWrapEl.style.display = showTable ? 'block' : 'none';
+    if (!showTable) tableBodyEl.innerHTML = '';
 }
 
 async function refreshFromAppState(appState) {
-    if (!modalOverlay || !isOpen) return;
-
+    if (!isOpen) return;
     const settings = readSettings();
-    const today = new Date();
-    const todayStart = startOfDay(today);
-    const currentWeekStart = getWeekRange(today).weekStart;
+    const now = new Date();
+    const team = appState?.team;
 
-    if (settings.startDate.getTime() > todayStart.getTime()) {
-        tableBodyEl.innerHTML = '';
-        setModalState({
-            headline: 'Weekly average',
-            meta: `Target ${formatWeeklyHours(settings.weeklyHours)} h/week across ${settings.workdaysDescription} from ${longDateFmt.format(settings.startDate)}.`,
-            empty: 'Choose a start date on or before today to calculate the running weekly average.',
-        });
+    if (settings.startDate > getDayStart(now)) {
+        setModalState({ meta: `Target ${settings.description}.`, empty: 'Choose a start date on or before today to calculate the running weekly average.' });
         return;
     }
-
-    const team = appState?.team || null;
     if (!team?.id) {
-        tableBodyEl.innerHTML = '';
-        setModalState({
-            headline: 'Weekly average',
-            meta: `Target ${formatWeeklyHours(settings.weeklyHours)} h/week across ${settings.workdaysDescription} from ${longDateFmt.format(settings.startDate)}.`,
-            empty: 'Choose a team to compare actual hours against the weekly target.',
-        });
+        setModalState({ meta: `Target ${settings.description}.`, empty: 'Choose a team to compare actual hours against the weekly target.' });
         return;
     }
 
     const refreshId = ++refreshToken;
-    const requestStart = getWeekRange(settings.startDate).weekStart;
-    setModalState({
-        headline: 'Weekly average',
-        meta: `Target ${formatWeeklyHours(settings.weeklyHours)} h/week across ${settings.workdaysDescription} from ${longDateFmt.format(settings.startDate)} for ${team.displayName}.`,
-        loading: true,
-    });
-
+    const meta = `Target ${settings.description} for ${team.displayName}.`;
+    setModalState({ meta, loading: true });
     try {
-        const cards = await getCardsForRange(team.id, requestStart, today, appState?.dataVersion || 0);
+        const cards = await getCardsForRange(team.id, getWeekStart(settings.startDate), now, appState.dataVersion || 0);
         if (refreshId !== refreshToken || !isOpen) return;
-        const model = buildWeeklyModel(cards, settings, currentWeekStart, today);
-        renderWeeklyModel(team.displayName, settings, model);
+        renderWeeklyModel(team.displayName, settings, buildWeeklyModel(cards, settings, now));
     } catch (error) {
         if (refreshId !== refreshToken || !isOpen) return;
-        tableBodyEl.innerHTML = '';
         showError('Failed to load weekly average: ' + error.message);
-        setModalState({
-            headline: 'Weekly average',
-            meta: `Target ${formatWeeklyHours(settings.weeklyHours)} h/week across ${settings.workdaysDescription} from ${longDateFmt.format(settings.startDate)} for ${team.displayName}.`,
-            empty: 'Could not load weekly average data right now.',
-        });
+        setModalState({ meta, empty: 'Could not load weekly average data right now.' });
     }
 }
 
 async function getCardsForRange(teamId, requestStart, requestEnd, dataVersion) {
-    const requestKey = [
-        teamId,
-        formatDateInputValue(requestStart),
-        formatDateInputValue(startOfDay(requestEnd)),
-        String(dataVersion || 0),
-    ].join(':');
-
+    const requestKey = [teamId, formatDateInputValue(requestStart), formatDateInputValue(requestEnd), dataVersion].join(':');
     if (cardsCache.key === requestKey) return cardsCache.cards;
     if (pendingCardsKey === requestKey && pendingCardsPromise) return pendingCardsPromise;
 
     pendingCardsKey = requestKey;
     pendingCardsPromise = fetchTimeCardsForDateRange(teamId, requestStart, requestEnd)
         .then(result => {
-            cardsCache = { key: requestKey, cards: result.cards || [] };
+            cardsCache = { key: requestKey, cards: result.cards };
             return cardsCache.cards;
         })
         .finally(() => {
@@ -422,226 +304,64 @@ async function getCardsForRange(teamId, requestStart, requestEnd, dataVersion) {
     return pendingCardsPromise;
 }
 
-function buildWeeklyModel(cards, settings, currentWeekStart, now) {
-    const rangeStartMs = settings.startDate.getTime();
-    const rangeEndMs = now.getTime();
-    const dailyActuals = buildDailyActuals(cards, rangeStartMs, rangeEndMs);
-    const currentWeekKey = formatDateInputValue(currentWeekStart);
-    const todayStart = startOfDay(now).getTime();
-    const weekEntries = [];
-    let expectedCumulativeMs = 0;
-    let actualCumulativeMs = 0;
-    const firstWeekStart = getWeekRange(settings.startDate).weekStart;
-
-    for (let weekStart = new Date(firstWeekStart); weekStart.getTime() <= currentWeekStart.getTime(); weekStart = addCalendarDays(weekStart, 7)) {
-        const weekKey = formatDateInputValue(weekStart);
-        const isCurrentWeek = weekKey === currentWeekKey;
-        const expectedCumulativeBeforeWeekMs = expectedCumulativeMs;
-        const actualCumulativeBeforeWeekMs = actualCumulativeMs;
-        const weekStartMs = weekStart.getTime();
-        const weekEnd = addCalendarDays(weekStart, 6);
-        let expectedWeekMs = 0;
-        let actualWeekMs = 0;
-        let expectedWeekRunningMs = 0;
-        let actualWeekRunningMs = 0;
-        const detailRows = [];
-
-        for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-            const day = addCalendarDays(weekStart, dayIndex);
-            const dayMs = day.getTime();
-            const dayKey = formatDateInputValue(day);
-            const isBeforeStart = dayMs < rangeStartMs;
-            const actualDayMs = dailyActuals.get(dayKey) || 0;
-            const expectedDayMs = isBeforeStart ? 0 : getExpectedDayMs(day, settings);
-
-            expectedWeekMs += expectedDayMs;
-            actualWeekMs += actualDayMs;
-
-            if (isCurrentWeek) {
-                expectedWeekRunningMs += expectedDayMs;
-                actualWeekRunningMs += actualDayMs;
-                detailRows.push({
-                    rowType: 'day',
-                    day,
-                    expectedDailyMs: expectedDayMs,
-                    expectedWeekMs: expectedWeekRunningMs,
-                    actualDailyMs: actualDayMs,
-                    actualWeekMs: actualWeekRunningMs,
-                    weeklyDifferenceMs: actualDayMs - expectedDayMs,
-                    differenceMs: (actualCumulativeBeforeWeekMs + actualWeekRunningMs) - (expectedCumulativeBeforeWeekMs + expectedWeekRunningMs),
-                    isFutureDay: dayMs > todayStart,
-                    isBeforeStart,
-                    isWorkday: !isBeforeStart && expectedDayMs > 0,
-                    isDetailFirst: dayIndex === 0,
-                });
-            }
-        }
-
-        expectedCumulativeMs += expectedWeekMs;
-        actualCumulativeMs += actualWeekMs;
-        weekEntries.push({
-            weekRow: {
-                rowType: 'week',
-                weekStart,
-                weekEnd,
-                expectedDailyMs: settings.dailyTargetMs,
-                expectedWeekMs,
-                actualWeekMs,
-                weeklyDifferenceMs: actualWeekMs - expectedWeekMs,
-                expectedCumulativeMs,
-                actualCumulativeMs,
-                differenceMs: actualCumulativeMs - expectedCumulativeMs,
-                isCurrentWeek,
-                isPartialWeek: expectedWeekMs < (settings.dailyTargetMs * settings.workdays.length),
-            },
-            detailRows,
-        });
-    }
-
-    const rows = [];
-    weekEntries.reverse().forEach(entry => {
-        rows.push(entry.weekRow);
-        if (entry.weekRow.isCurrentWeek) {
-            rows.push(...entry.detailRows.slice().reverse().map((row, index) => ({
-                ...row,
-                isDetailFirst: index === 0,
-            })));
-        }
-    });
-
-    return {
-        rows,
-        expectedCumulativeMs,
-        actualCumulativeMs,
-        differenceMs: actualCumulativeMs - expectedCumulativeMs,
-    };
-}
-
-function getExpectedDayMs(day, settings) {
-    return isWorkday(day, settings.workdaysSet) ? settings.dailyTargetMs : 0;
-}
-
-function buildDailyActuals(cards, rangeStartMs, rangeEndMs) {
-    const totals = new Map();
-    cards.forEach(card => {
-        getWorkSegments(card, rangeEndMs).forEach(([segmentStartMs, segmentEndMs]) => {
-            const clippedStartMs = Math.max(segmentStartMs, rangeStartMs);
-            const clippedEndMs = Math.min(segmentEndMs, rangeEndMs);
-            if (clippedEndMs <= clippedStartMs) return;
-
-            let cursorMs = clippedStartMs;
-            while (cursorMs < clippedEndMs) {
-                const dayStart = startOfDay(cursorMs);
-                const nextDayMs = dayStart.getTime() + DAY_MS;
-                const sliceEndMs = Math.min(clippedEndMs, nextDayMs);
-                const dayKey = formatDateInputValue(dayStart);
-                totals.set(dayKey, (totals.get(dayKey) || 0) + (sliceEndMs - cursorMs));
-                cursorMs = sliceEndMs;
-            }
-        });
-    });
-    return totals;
-}
-
-function getWorkSegments(card, referenceEndMs) {
-    if (!card?.clockIn?.dateTime) return [];
-    const startMs = new Date(card.clockIn.dateTime).getTime();
-    const endMs = card.clockOut?.dateTime ? new Date(card.clockOut.dateTime).getTime() : referenceEndMs;
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
-
-    const breaks = (card.breaks || [])
-        .filter(item => item?.start?.dateTime)
-        .map(item => ({
-            startMs: new Date(item.start.dateTime).getTime(),
-            endMs: item.end?.dateTime ? new Date(item.end.dateTime).getTime() : referenceEndMs,
-        }))
-        .filter(item => Number.isFinite(item.startMs))
-        .sort((a, b) => a.startMs - b.startMs);
-
-    const segments = [];
-    let cursorMs = startMs;
-    breaks.forEach(item => {
-        const breakStartMs = Math.min(Math.max(item.startMs, startMs), endMs);
-        const breakEndMs = Math.min(Math.max(item.endMs, breakStartMs), endMs);
-        if (breakStartMs > cursorMs) segments.push([cursorMs, breakStartMs]);
-        cursorMs = Math.max(cursorMs, breakEndMs);
-    });
-    if (cursorMs < endMs) segments.push([cursorMs, endMs]);
-    return segments.filter(([segmentStartMs, segmentEndMs]) => segmentEndMs > segmentStartMs);
-}
-
 function renderWeeklyModel(teamName, settings, model) {
     tableBodyEl.innerHTML = '';
-    model.rows.forEach(row => tableBodyEl.appendChild(buildRow(row)));
+    model.rows.forEach((row, index) => tableBodyEl.appendChild(
+        row.rowType === 'day' ? buildDayRow(row, model.rows[index - 1]?.rowType === 'week') : buildWeekRow(row),
+    ));
     setModalState({
         headline: describeDifference(model.differenceMs),
-        meta: `Actual ${formatDurationHms(model.actualCumulativeMs)} vs expected ${formatDurationHms(model.expectedCumulativeMs)} for ${teamName}, starting ${longDateFmt.format(settings.startDate)} at ${formatWeeklyHours(settings.weeklyHours)} h/week across ${settings.workdaysDescription}.`,
+        meta: `Actual ${formatDurationHms(model.actualCumulativeMs)} vs expected ${formatDurationHms(model.expectedCumulativeMs)} through today for ${teamName}, at ${settings.description}.`,
         showTable: true,
     });
 }
 
 function describeDifference(differenceMs) {
     if (Math.abs(differenceMs) < 1000) return 'On target';
-    const direction = differenceMs < 0 ? 'behind target' : 'ahead of target';
-    return `${formatDurationHms(Math.abs(differenceMs))} ${direction}`;
+    return `${formatDurationHms(Math.abs(differenceMs))} ${differenceMs < 0 ? 'behind target' : 'ahead of target'}`;
 }
 
-function buildRow(row) {
-    if (row.rowType === 'day') return buildDayRow(row);
+function differenceCells(row) {
+    const cell = ms => {
+        const tone = ms < -999 ? 'negative' : ms > 999 ? 'positive' : 'neutral';
+        return `<td class="weekly-avg-mono weekly-avg-mono-signed weekly-avg-diff-${tone}">${formatSignedDuration(ms)}</td>`;
+    };
+    return cell(row.differenceMs) + cell(row.cumulativeDifferenceMs);
+}
 
+function buildWeekRow(row) {
     const tr = document.createElement('tr');
-    const weeklyDiffClass = getDifferenceClass(row.weeklyDifferenceMs);
-    const cumulativeDiffClass = getDifferenceClass(row.differenceMs);
-    const weekState = row.isCurrentWeek ? 'Current week' : row.isPartialWeek ? 'Partial week' : '';
+    const weekState = row.isCurrentWeek
+        ? `Current week, ${formatDurationHms(row.targetMs)} target`
+        : row.isPartialWeek ? 'Partial week' : '';
     tr.className = row.isCurrentWeek ? 'weekly-avg-row-current' : '';
     tr.innerHTML = `
         <td class="weekly-avg-cell-label">
             <div class="weekly-avg-week-label">${shortDateFmt.format(row.weekStart)} - ${shortDateFmt.format(row.weekEnd)}</div>
             ${weekState ? `<div class="weekly-avg-week-state">${weekState}</div>` : ''}
         </td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.expectedWeekMs)}</td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.actualWeekMs)}</td>
-        <td class="weekly-avg-mono weekly-avg-mono-signed ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
-        <td class="weekly-avg-mono weekly-avg-mono-signed ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
+        <td class="weekly-avg-mono">${formatDurationHms(row.expectedMs)}</td>
+        <td class="weekly-avg-mono">${formatDurationHms(row.actualMs)}</td>
+        ${differenceCells(row)}
     `;
     return tr;
 }
 
-function buildDayRow(row) {
+function buildDayRow(row, isFirst) {
     const tr = document.createElement('tr');
-    const weeklyDiffClass = getDifferenceClass(row.weeklyDifferenceMs);
-    const cumulativeDiffClass = getDifferenceClass(row.differenceMs);
     tr.className = [
         'weekly-avg-row-detail',
-        row.isDetailFirst ? 'weekly-avg-row-detail-first' : '',
-        row.isFutureDay ? 'weekly-avg-row-detail-future' : '',
+        isFirst ? 'weekly-avg-row-detail-first' : '',
+        row.isFuture ? 'weekly-avg-row-detail-future' : '',
         row.isWorkday ? '' : 'weekly-avg-row-detail-off',
     ].filter(Boolean).join(' ');
     tr.innerHTML = `
         <td class="weekly-avg-cell-label">
             <div class="weekly-avg-week-label weekly-avg-day-label">${weekdayFmt.format(row.day)}</div>
         </td>
-        <td class="weekly-avg-mono">${formatExpectedDetailDuration(row.expectedDailyMs, row.isWorkday)}</td>
-        <td class="weekly-avg-mono">${formatDurationHms(row.actualDailyMs)}</td>
-        <td class="weekly-avg-mono weekly-avg-mono-signed ${weeklyDiffClass}">${formatSignedDuration(row.weeklyDifferenceMs)}</td>
-        <td class="weekly-avg-mono weekly-avg-mono-signed ${cumulativeDiffClass}">${formatSignedDuration(row.differenceMs)}</td>
+        <td class="weekly-avg-mono">${row.isWorkday ? formatDurationHms(row.targetMs) : '—'}</td>
+        <td class="weekly-avg-mono">${formatDurationHms(row.actualMs)}</td>
+        ${row.isFuture ? '<td></td><td></td>' : differenceCells(row)}
     `;
     return tr;
-}
-
-function formatExpectedDetailDuration(durationMs, isWorkday) {
-    return isWorkday ? formatDurationHms(durationMs) : '—';
-}
-
-function getDifferenceClass(durationMs) {
-    return durationMs < -999
-        ? 'weekly-avg-diff-negative'
-        : durationMs > 999
-            ? 'weekly-avg-diff-positive'
-            : 'weekly-avg-diff-neutral';
-}
-
-function formatSignedDuration(durationMs) {
-    const prefix = durationMs < 0 ? '-' : durationMs > 0 ? '+' : '\u2007';
-    return `${prefix}${formatDurationHms(Math.abs(durationMs))}`;
 }

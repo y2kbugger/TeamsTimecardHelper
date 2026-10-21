@@ -57,7 +57,13 @@
 - Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.
 
 ## TODO
+Agent tooling first; it is the flywheel for everything after it.
+- Agent test entrypoint: one text-only command or page mode that runs the tests and side-channels a condensed result (pass count, failures only) to a file the agent reads from the shell, so nobody has to look at the human-readable test page.
+- Dev server that never serves stale files (no-cache), so a reload always runs the code on disk.
+- Pure logic (week math, durations, card shapes, the weekly model) in a DOM-free module with `node --test` unit tests that run in the terminal in under a second.
+- A mock Graph backend (in-browser, opt-in) so the agent can exercise clock in/out, breaks, drags, edits and deletes without touching real timecards.
+- Then:
+- Recover from an expired refresh token. On an unmanaged PC the refresh token lease is short (8 of 24 hours); a page left open over sleep fails every interaction until the user reloads and signs in again.
 - Full overhaul: less app code (JS and CSS), more tests, more DRY, more performant, less janky (drag glitches), and a little better looking.
 - add mobile css
-- Recover from an expired refresh token. On an unmanaged PC the refresh token lease is short (8 of 24 hours); a page left open over sleep fails every interaction until the user reloads and signs in again.
 

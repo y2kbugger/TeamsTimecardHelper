@@ -25,3 +25,30 @@ export function showError(message) {
     banner.style.display = 'block';
     setTimeout(() => { banner.style.display = 'none'; }, 8000);
 }
+
+// ── Dev server side channel (devserver.py): only on localhost, never in production ──
+
+const isDevServer = location.hostname === 'localhost';
+
+function postToDevServer(path, text) {
+    if (!isDevServer) return;
+    void fetch(path, { method: 'POST', body: text, keepalive: true }).catch(() => { });
+}
+
+// A condensed report written to .agent/<name>.txt, for reading from the shell.
+export function reportToDevServer(name, text) {
+    postToDevServer(`/__agent/report?name=${encodeURIComponent(name)}`, text);
+}
+
+// Uncaught errors, rejections and console.error, appended to .agent/browser.log.
+if (isDevServer && !window.__devLogInstalled) {
+    window.__devLogInstalled = true;
+    const log = (kind, detail) => postToDevServer('/__agent/log', `${new Date().toISOString()} ${location.pathname} ${kind}: ${detail}`);
+    window.addEventListener('error', event => log('error', `${event.message} at ${event.filename}:${event.lineno}`));
+    window.addEventListener('unhandledrejection', event => log('rejection', event.reason?.stack || event.reason));
+    const consoleError = console.error.bind(console);
+    console.error = (...args) => {
+        log('console.error', args.map(arg => arg?.stack || (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
+        consoleError(...args);
+    };
+}

@@ -1,17 +1,25 @@
-import * as auth from './auth.js?v=20260504a';
+import * as auth from './auth.js';
 import { $, escHtml, toast, showError } from './ui.js';
+import {
+    addDays, buildProjectedTimelineUpdate, buildTimeCardUpdateBody, buildUpdatedCard, cardOverlapsRange,
+    cloneCardBreaks, dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
+    getDayStart, getWeekRange as getCalendarWeekRange, getWeekStart, groupByDay, isOpenCard, isSameDay,
+    normalizeCard, parseLocalDate, snapMs, toLocalDatetimeInput, workedMs,
+} from './core.js';
+
+export { buildProjectedTimelineUpdate, formatDateInputValue, formatDurationHms, workedMs };
 
 const SESSION_KEY_SELECTED_TEAM_ID = 'tc_selected_team_id';
 const SESSION_KEY_SELECTED_WEEK = 'tc_selected_week';
+const SESSION_KEY_LAST_ACTIVITY = 'tc_last_activity_at';
+const WEEK_RESET_IDLE_MS = 60 * 60 * 1000;
 const SESSION_CACHE_KEY_JOINED_TEAMS = 'tc_joined_teams';
-const SNAP_MINUTES = 5;
 const DEFAULT_BREAK_DURATION_MS = 10 * 60 * 1000;
 const EXTEND_TO_NOW_LAG_MS = 30 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
 const CACHE_STALE_MS = 45 * 1000;
 const BACKGROUND_REFRESH_MS = 30 * 1000;
 const TIMECARD_PAGE_SIZE = 250;
-const WEEKLY_AVG_MODULE = './weeklyavg.js?v=20260501p';
+const WEEKLY_AVG_MODULE = './weeklyavg.js';
 
 const graphFetch = auth.graphFetch;
 const graphFetchBeta = auth.graphFetchBeta;
@@ -61,13 +69,7 @@ async function ensureWeeklyAverageFeature() {
         weeklyAverageFeatureInitPromise = import(WEEKLY_AVG_MODULE)
             .then(module => {
                 weeklyAverageFeatureModule = module;
-                module.initWeeklyAverageFeature({
-                    fetchTimeCardsForDateRange,
-                    formatDateInputValue,
-                    formatDurationHms,
-                    getCurrentAppState,
-                    getWeekRange,
-                });
+                module.initWeeklyAverageFeature({ fetchTimeCardsForDateRange, getCurrentAppState });
                 syncWeeklyAverageFeatureVisibility();
             })
             .catch(error => {
@@ -107,6 +109,8 @@ bindEvent(btnWeekPrev, 'click', () => shiftSelectedWeek(-7));
 bindEvent(btnWeekNext, 'click', () => shiftSelectedWeek(7));
 bindEvent(weekPicker, 'change', onWeekPickerChange);
 bindEvent(document, 'visibilitychange', handleVisibilityChange);
+bindEvent(document, 'pointerdown', noteActivity);
+bindEvent(document, 'keydown', noteActivity);
 bindEvent($('btn-edit-cancel'), 'click', closeEditModal);
 bindEvent($('btn-edit-save'), 'click', saveEditModal);
 bindEvent($('btn-add-break-edit'), 'click', addBreakRow);
@@ -118,6 +122,8 @@ if (document.body.dataset.page === 'app' && !auth.isPopupContext()) {
 }
 
 async function boot() {
+    // The selected week used to live in localStorage and pinned new visits to a stale week.
+    localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
     const authenticated = await auth.requireAppSession();
     if (!authenticated) return;
     const account = auth.getCurrentAccount();
@@ -138,7 +144,8 @@ async function handleSignOut() {
     latestVisibleCardId = null;
     allTimeCards = [];
     syncWeeklyAverageFeatureVisibility();
-    localStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
+    sessionStorage.removeItem(SESSION_KEY_SELECTED_WEEK);
+    sessionStorage.removeItem(SESSION_KEY_LAST_ACTIVITY);
     sessionStorage.removeItem(SESSION_CACHE_KEY_JOINED_TEAMS);
     document.title = 'Teams Timecards';
     await auth.signOut();
@@ -322,12 +329,18 @@ async function refreshTimeCards({ forceSpinner = false } = {}) {
     }
 
     const request = (async () => {
-        const snapshot = await fetchWeekTimeCards(teamId, targetWeekStart);
+        // The active card lives in the current week; fetch it too when another week is selected.
+        const isCurrentWeek = targetWeekKey === getWeekCacheKey(new Date());
+        const [snapshot, activeSnapshot] = await Promise.all([
+            fetchWeekTimeCards(teamId, targetWeekStart),
+            isCurrentWeek ? null : fetchWeekTimeCards(teamId, new Date()),
+        ]);
         setCachedWeek(cache, targetWeekStart, snapshot.cards, snapshot.fetchedAt);
+        const activeSource = activeSnapshot || snapshot;
         const knownActiveCardWasReturned = Boolean(
-            cache.activeCard && snapshot.cards.some(card => card.id === cache.activeCard.id),
+            cache.activeCard && activeSource.cards.some(card => card.id === cache.activeCard.id),
         );
-        cache.activeCard = snapshot.activeCard
+        cache.activeCard = activeSource.activeCard
             || (knownActiveCardWasReturned ? null : cache.activeCard);
 
         if (selectedTeam && selectedTeam.id === teamId && getWeekCacheKey(selectedWeekStart) === targetWeekKey) {
@@ -371,28 +384,13 @@ export function buildTimeCardsPageUrl(teamId, { pageSize = TIMECARD_PAGE_SIZE } 
     return `/teams/${teamId}/schedule/timeCards?$top=${pageSize}`;
 }
 
+// The week of the given date; with none, the selected week, else the stored one, else this week.
 export function getResolvedWeekStart(weekStartInput = null) {
-    if (weekStartInput instanceof Date && !Number.isNaN(weekStartInput.getTime())) {
-        return getWeekStart(weekStartInput);
-    }
-    if (typeof weekStartInput === 'string' && weekStartInput) {
-        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(weekStartInput)
-            ? new Date(`${weekStartInput}T00:00:00`)
-            : new Date(weekStartInput);
-        if (!Number.isNaN(parsed.getTime())) return getWeekStart(parsed);
-    }
-    if (selectedWeekStart instanceof Date && !Number.isNaN(selectedWeekStart.getTime())) {
-        return getWeekStart(selectedWeekStart);
-    }
-    const storedWeek = localStorage.getItem(SESSION_KEY_SELECTED_WEEK);
-    if (storedWeek) {
-        const parsed = new Date(`${storedWeek}T00:00:00`);
-        if (!Number.isNaN(parsed.getTime())) return getWeekStart(parsed);
-    }
-    const fallback = activeTimeCard?.clockIn?.dateTime
-        ? new Date(activeTimeCard.clockIn.dateTime)
-        : new Date();
-    return getWeekStart(fallback);
+    const date = parseLocalDate(weekStartInput)
+        || parseLocalDate(selectedWeekStart)
+        || (isIdle() ? null : parseLocalDate(sessionStorage.getItem(SESSION_KEY_SELECTED_WEEK)))
+        || new Date();
+    return getWeekStart(date);
 }
 
 function getWeekCacheKey(weekStartInput) {
@@ -406,107 +404,49 @@ function setCachedWeek(cache, weekStartInput, cards, fetchedAt = Date.now()) {
     return cache.currentWeekCards;
 }
 
-function isOpenCardState(card) {
-    if (!card) return false;
-    const state = deriveCardState(card);
-    return state === 'clockedIn' || state === 'onBreak';
-}
-
 export function getWeekRange(weekStartInput = null) {
-    const weekStart = getResolvedWeekStart(weekStartInput);
-    const weekEndExclusive = new Date(weekStart.getTime() + (7 * DAY_MS));
-    const weekEndInclusive = new Date(weekEndExclusive.getTime() - 1);
-    return { weekStart, weekEndExclusive, weekEndInclusive };
+    return getCalendarWeekRange(getResolvedWeekStart(weekStartInput));
 }
 
-function cardOverlapsRange(card, rangeStartMs, rangeEndExclusiveMs, referenceNowMs = Date.now()) {
-    if (!card?.clockIn?.dateTime) return false;
-    const startMs = new Date(card.clockIn.dateTime).getTime();
-    const endMs = card.clockOut?.dateTime ? new Date(card.clockOut.dateTime).getTime() : referenceNowMs;
-    return startMs < rangeEndExclusiveMs && endMs >= rangeStartMs;
-}
-
-function filterCardsForWeek(cards, weekStartInput = null, referenceNowMs = Date.now()) {
+function filterCardsForWeek(cards, weekStartInput = null) {
     const { weekStart, weekEndExclusive } = getWeekRange(weekStartInput);
-    return dedupeCardsById(cards).filter(card => cardOverlapsRange(
-        card, weekStart.getTime(), weekEndExclusive.getTime(), referenceNowMs,
-    ));
+    return dedupeCardsById(cards).filter(card => cardOverlapsRange(card, weekStart.getTime(), weekEndExclusive.getTime()));
 }
 
-function buildSelectedWeekClockInWindowFilter(weekStartInput) {
-    const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
-    return `clockInEvent/dateTime ge ${weekStart.toISOString()} and clockInEvent/dateTime le ${weekEndInclusive.toISOString()}`;
-}
-
-function resolveRangeBoundary(rangeInput, endOfDay = false) {
-    if (rangeInput instanceof Date && !Number.isNaN(rangeInput.getTime())) return new Date(rangeInput);
-    if (typeof rangeInput === 'string' && rangeInput) {
-        const parsed = /^\d{4}-\d{2}-\d{2}$/.test(rangeInput)
-            ? new Date(`${rangeInput}T${endOfDay ? '23:59:59.999' : '00:00:00'}`)
-            : new Date(rangeInput);
-        if (!Number.isNaN(parsed.getTime())) return parsed;
+// Cards that clocked in within [rangeStart, rangeEndInclusive], following every page. The tenant
+// rejects `or` in timeCard filters, so this clock-in window is the one query shape there is.
+async function fetchClockedInBetween(teamId, rangeStart, rangeEndInclusive) {
+    const filterExpr = `clockInEvent/dateTime ge ${rangeStart.toISOString()} and clockInEvent/dateTime le ${rangeEndInclusive.toISOString()}`;
+    let nextUrl = `/teams/${teamId}/schedule/timeCards?$top=${TIMECARD_PAGE_SIZE}&$filter=${encodeURIComponent(filterExpr)}`;
+    let pageCount = 0;
+    const cards = [];
+    while (nextUrl) {
+        const data = await graphFetch(nextUrl);
+        (data?.value || []).forEach(raw => cards.push(normalizeCard(raw)));
+        pageCount += 1;
+        nextUrl = data?.['@odata.nextLink'] || null;
     }
-    throw new Error('Invalid timecard range boundary.');
-}
-
-function buildClockInWindowFilter(rangeStartInput, rangeEndInput) {
-    const rangeStart = resolveRangeBoundary(rangeStartInput);
-    const rangeEnd = resolveRangeBoundary(rangeEndInput, true);
-    return `clockInEvent/dateTime ge ${rangeStart.toISOString()} and clockInEvent/dateTime le ${rangeEnd.toISOString()}`;
+    return { cards: dedupeCardsById(cards), fetchedAt: Date.now(), pageCount };
 }
 
 export async function fetchWeekTimeCards(teamId, weekStartInput) {
-    const filterExpr = buildSelectedWeekClockInWindowFilter(weekStartInput);
-    let nextUrl = `/teams/${teamId}/schedule/timeCards?$top=${TIMECARD_PAGE_SIZE}&$filter=${encodeURIComponent(filterExpr)}`;
-    let pageCount = 0;
-    const byId = new Map();
-
-    while (nextUrl) {
-        const data = await graphFetch(nextUrl);
-        (data?.value || []).forEach(raw => {
-            const card = normalizeCard(raw);
-            byId.set(card.id, card);
-        });
-        pageCount += 1;
-        nextUrl = data?.['@odata.nextLink'] || null;
-    }
-
-    const filteredCards = filterCardsForWeek(Array.from(byId.values()), weekStartInput);
-    const activeCards = filteredCards
-        .filter(card => isOpenCardState(card))
-        .sort((a, b) => getCardSortMs(b) - getCardSortMs(a));
-
+    const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
+    const result = await fetchClockedInBetween(teamId, weekStart, weekEndInclusive);
+    const cards = filterCardsForWeek(result.cards, weekStart);
     return {
-        weekStart: getResolvedWeekStart(weekStartInput),
-        weekKey: getWeekCacheKey(weekStartInput),
-        fetchedAt: Date.now(),
-        activeCard: activeCards.find(card => isOpenCardState(card)) || null,
-        cards: filteredCards,
-        pageCount,
+        ...result,
+        weekStart,
+        weekKey: formatDateInputValue(weekStart),
+        activeCard: findActiveCard(cards),
+        cards,
     };
 }
 
+// Whole local days: from the start of rangeStart's day through the end of rangeEnd's day.
 export async function fetchTimeCardsForDateRange(teamId, rangeStartInput, rangeEndInput) {
-    const filterExpr = buildClockInWindowFilter(rangeStartInput, rangeEndInput);
-    let nextUrl = `/teams/${teamId}/schedule/timeCards?$top=${TIMECARD_PAGE_SIZE}&$filter=${encodeURIComponent(filterExpr)}`;
-    let pageCount = 0;
-    const byId = new Map();
-
-    while (nextUrl) {
-        const data = await graphFetch(nextUrl);
-        (data?.value || []).forEach(raw => {
-            const card = normalizeCard(raw);
-            byId.set(card.id, card);
-        });
-        pageCount += 1;
-        nextUrl = data?.['@odata.nextLink'] || null;
-    }
-
-    return {
-        cards: dedupeCardsById(Array.from(byId.values())),
-        fetchedAt: Date.now(),
-        pageCount,
-    };
+    const rangeStart = getDayStart(parseLocalDate(rangeStartInput));
+    const rangeEndInclusive = new Date(addDays(getDayStart(parseLocalDate(rangeEndInput)), 1).getTime() - 1);
+    return fetchClockedInBetween(teamId, rangeStart, rangeEndInclusive);
 }
 
 function applyTimeCards(cards) {
@@ -515,65 +455,6 @@ function applyTimeCards(cards) {
     if (highlightedCardId && !allTimeCards.some(card => card.id === highlightedCardId)) highlightedCardId = null;
     updateToolbarState();
     renderWeeks();
-}
-
-function deriveCardState(card) {
-    if (card.clockOut) return 'clockedOut';
-    if (card.breaks.some(item => item.start && !item.end)) return 'onBreak';
-    return 'clockedIn';
-}
-
-function cloneCardBreaks(breaks) {
-    return (breaks || []).map(b => ({
-        breakId: b.breakId,
-        start: b.start ? { ...b.start } : null,
-        end: b.end ? { ...b.end } : null,
-    }));
-}
-
-function buildEventObj(prior, dt) {
-    return dt ? {
-        ...(prior || {}),
-        dateTime: dt.toISOString(),
-        atApprovedLocation: prior?.atApprovedLocation ?? false,
-    } : null;
-}
-
-function buildUpdatedCard(card, changes = {}) {
-    const updated = {
-        ...card,
-        clockIn: changes.clockIn !== undefined
-            ? buildEventObj(card.clockIn, changes.clockIn)
-            : (card.clockIn ? { ...card.clockIn } : null),
-        clockOut: changes.clockOut !== undefined
-            ? buildEventObj(card.clockOut, changes.clockOut)
-            : (card.clockOut ? { ...card.clockOut } : null),
-        breaks: cloneCardBreaks(changes.breaks ?? card.breaks),
-        notes: changes.notes !== undefined
-            ? (changes.notes ? { contentType: 'text', content: changes.notes } : null)
-            : (card.notes ? { contentType: card.notes.contentType, content: card.notes.content } : null),
-        lastModifiedDateTime: new Date().toISOString(),
-    };
-    updated.state = deriveCardState(updated);
-    return updated;
-}
-
-function buildTimeCardUpdateBody(card) {
-    const ev = e => e ? { dateTime: e.dateTime, atApprovedLocation: e.atApprovedLocation ?? false } : undefined;
-    const body = {
-        clockInEvent: ev(card.clockIn),
-        clockOutEvent: ev(card.clockOut),
-        breaks: card.breaks.map(b => ({
-            breakId: b.breakId,
-            start: b.start ? { dateTime: b.start.dateTime } : undefined,
-            end: b.end ? { dateTime: b.end.dateTime } : undefined,
-            notes: { contentType: 'text', content: '' },
-        })),
-        notes: card.notes ? { ...card.notes } : undefined,
-    };
-    if (!body.clockOutEvent) delete body.clockOutEvent;
-    if (!body.notes) delete body.notes;
-    return body;
 }
 
 function getSelectedWeekCards(cards) {
@@ -607,8 +488,11 @@ function applyUpdatedCardLocally(updatedCard) {
     if (!selectedTeam) return;
     const cache = getTeamCache(selectedTeam.id);
     upsertCardInLoadedWeeks(cache, updatedCard);
-    if (isOpenCardState(updatedCard)) cache.activeCard = updatedCard;
+    if (isOpenCard(updatedCard)) cache.activeCard = updatedCard;
     else if (activeTimeCard?.id === updatedCard.id) cache.activeCard = null;
+    // The toolbar follows the active card even when another week is on screen.
+    activeTimeCard = cache.activeCard;
+    updateToolbarState();
     renderSelectedWeekFromCache(cache);
 }
 
@@ -640,7 +524,8 @@ async function resolveTimeCardActionResponse(response, { actionLabel, teamId, ca
     if (weekStartInput !== null) {
         const snapshot = await fetchWeekTimeCards(teamId, weekStartInput);
         const cache = getTeamCache(teamId);
-        setCachedWeek(cache, weekStartInput, snapshot.cards, snapshot.fetchedAt);
+        // The cache holds the selected week only; another week's cards must not replace it.
+        if (cache.currentWeekKey === snapshot.weekKey) setCachedWeek(cache, weekStartInput, snapshot.cards, snapshot.fetchedAt);
         cache.activeCard = snapshot.activeCard || null;
         if (snapshot.activeCard?.id) return snapshot.activeCard;
     }
@@ -648,6 +533,7 @@ async function resolveTimeCardActionResponse(response, { actionLabel, teamId, ca
 }
 
 function refreshTimeCardsInBackground() {
+    if (returnToCurrentWeekIfIdle()) { void loadTimeCards(); return; }
     void refreshTimeCards().catch(error => showError('Failed to refresh timecards: ' + error.message));
 }
 
@@ -674,44 +560,6 @@ function syncBackgroundRefreshLoop() {
             refreshTimeCardsInBackground();
         }, BACKGROUND_REFRESH_MS);
     }
-}
-
-function dedupeCardsById(cards) {
-    const byId = new Map();
-    cards.forEach(card => byId.set(card.id, card));
-    return Array.from(byId.values());
-}
-
-function normalizeCard(raw) {
-    const card = {
-        id: raw.id,
-        state: raw.state,
-        userId: raw.userId,
-        createdDateTime: raw.createdDateTime,
-        lastModifiedDateTime: raw.lastModifiedDateTime,
-        clockIn: raw.clockInEvent ? {
-            dateTime: raw.clockInEvent.dateTime,
-            atApprovedLocation: raw.clockInEvent.atApprovedLocation,
-            notes: raw.clockInEvent.notes,
-        } : null,
-        clockOut: raw.clockOutEvent ? {
-            dateTime: raw.clockOutEvent.dateTime,
-            atApprovedLocation: raw.clockOutEvent.atApprovedLocation,
-            notes: raw.clockOutEvent.notes,
-        } : null,
-        breaks: (raw.breaks || []).map(b => ({
-            breakId: b.breakId,
-            start: b.start ? { dateTime: b.start.dateTime, notes: b.start.notes } : null,
-            end: b.end ? { dateTime: b.end.dateTime, notes: b.end.notes } : null,
-        })),
-        notes: raw.notes || null,
-    };
-    card.state = deriveCardState(card);
-    return card;
-}
-
-function getCardAnchorDateTime(card) {
-    return card?.clockIn?.dateTime || card?.clockInEvent?.dateTime || card?.createdDateTime || null;
 }
 
 function renderWeeks() {
@@ -752,34 +600,8 @@ function getLatestVisibleCardId(cards) {
     return latest?.id || null;
 }
 
-function getWeekStart(date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - d.getDay());
-    return d;
-}
-
-function getDayStart(date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d;
-}
-
-function groupByDay(cards) {
-    const map = new Map();
-    cards.forEach(card => {
-        const anchorDateTime = getCardAnchorDateTime(card);
-        if (!anchorDateTime) return;
-        const dayStart = getDayStart(new Date(anchorDateTime));
-        const key = dayStart.getTime();
-        if (!map.has(key)) map.set(key, { dayStart, cards: [] });
-        map.get(key).cards.push(card);
-    });
-    return Array.from(map.values());
-}
-
 function renderDaySections(cards, containerEl) {
-    const dayGroups = groupByDay(cards).sort((a, b) => b.dayStart - a.dayStart);
+    const dayGroups = groupByDay(cards);
     if (!dayGroups.length) {
         containerEl.innerHTML = '<div class="panel-empty">No timecards for this Sunday-Saturday week.</div>';
         return;
@@ -816,13 +638,13 @@ function renderDayTimeline(dayGroup, sectionEl) {
     timelineEl.innerHTML = '';
 
     const dayStartMs = dayGroup.dayStart.getTime();
-    const dayEndMs = dayStartMs + 24 * 3600 * 1000;
+    const dayEndMs = addDays(dayGroup.dayStart, 1).getTime();
     const totalSpanMs = dayEndMs - dayStartMs;
-    const labelInterval = 2 * 3600 * 1000;
 
-    for (let t = dayStartMs + labelInterval; t < dayEndMs; t += labelInterval) {
-        const pct = ((t - dayStartMs) / totalSpanMs) * 100;
-        const d = new Date(t);
+    for (let hour = 2; hour < 24; hour += 2) {
+        const d = new Date(dayGroup.dayStart);
+        d.setHours(hour);
+        const pct = ((d.getTime() - dayStartMs) / totalSpanMs) * 100;
         const hl = document.createElement('div');
         hl.className = 'hour-label';
         hl.style.left = pct + '%';
@@ -954,11 +776,6 @@ function msFromPct(pct, totalSpanMs) {
     return (pct / 100) * totalSpanMs;
 }
 
-function snapMs(ms) {
-    const snap = SNAP_MINUTES * 60 * 1000;
-    return Math.round(ms / snap) * snap;
-}
-
 function pctFromMs(ms, axisStartMs, totalSpanMs) {
     return ((ms - axisStartMs) / totalSpanMs) * 100;
 }
@@ -1048,6 +865,7 @@ async function onTimelineEnd(event) {
 
 function onBreakResizeMove(event) {
     const el = event.target;
+    if (!el.dataset.endMs && getActiveResizeEdge(el, event) === 'right') return;
     const axisW = getAxisWidth(el);
     const deltaWPct = (event.deltaRect.width / axisW) * 100;
     const deltaLPct = (event.deltaRect.left / axisW) * 100;
@@ -1082,6 +900,8 @@ async function onBreakEnd(event) {
     hideDragTooltip();
     const el = event.target;
     try {
+        const isOpenBreak = !el.dataset.endMs;
+        if (isOpenBreak && getActiveResizeEdge(el, event) === 'right') return;
         const card = allTimeCards.find(item => item.id === el.dataset.cardId);
         const breakIndex = Number(el.dataset.breakIndex);
         const pendingStart = Number(el.dataset.pendingStartMs);
@@ -1092,8 +912,9 @@ async function onBreakEnd(event) {
             return;
         }
         const newStart = new Date(pendingStart);
-        const newEnd = new Date(pendingEnd);
-        if (newEnd <= newStart) {
+        // An ongoing break keeps running: only its start moves.
+        const newEnd = isOpenBreak ? null : new Date(pendingEnd);
+        if (newEnd && newEnd <= newStart) {
             toast('Break end must be after break start', 'error');
             renderWeeks();
             return;
@@ -1134,7 +955,8 @@ function buildCardRow(card) {
     const inDt = card.clockIn ? fmtDateTime(new Date(card.clockIn.dateTime)) : '—';
     const outDt = card.clockOut ? fmtDateTime(new Date(card.clockOut.dateTime)) : '—';
     const workedHms = formatDurationHms(workedMs(card));
-    const showExtendToNow = card.id === latestVisibleCardId && Boolean(card.clockIn && card.clockOut);
+    const showExtendToNow = card.id === latestVisibleCardId && Boolean(card.clockIn && card.clockOut)
+        && isSameDay(new Date(card.clockOut.dateTime), new Date());
     row.innerHTML = `
     <div class="tc-row-date">${card.clockIn ? fmtDate(new Date(card.clockIn.dateTime)) : '—'}</div>
         <div class="tc-row-time" data-field="clock-in"><span class="tc-row-time-value">${inDt}</span></div>
@@ -1574,7 +1396,7 @@ async function saveEditModal() {
         const bStartDt = parseEditModalDateTimeValue(bStart, existingBreak?.start?.dateTime || '');
         const bEndDt = parseEditModalDateTimeValue(bEnd, existingBreak?.end?.dateTime || '');
 
-        if (newEnd && bStartDt < newStart) { toast('Break start must be within card time range', 'error'); return; }
+        if (bStartDt < newStart) { toast('Break start must be within card time range', 'error'); return; }
         if (newEnd && bEndDt && bEndDt > newEnd) { toast('Break end must be within card time range', 'error'); return; }
         if (bEndDt && bEndDt <= bStartDt) { toast('Break end must be after break start', 'error'); return; }
 
@@ -1607,15 +1429,6 @@ async function saveEditModal() {
     }
 }
 
-export function buildProjectedTimelineUpdate(card, newStart, newEnd) {
-    const effectiveEnd = card?.clockOut ? newEnd : null;
-    const updatedCard = buildUpdatedCard(card, { clockIn: newStart, clockOut: effectiveEnd });
-    return {
-        effectiveEnd,
-        updatedCard,
-        requestBody: buildTimeCardUpdateBody(updatedCard),
-    };
-}
 
 async function persistCardTimeUpdate(card, newStart, newEnd) {
     const projection = buildProjectedTimelineUpdate(card, newStart, newEnd);
@@ -1648,12 +1461,12 @@ async function persistBreakTimeUpdate(card, breakIndex, newStart, newEnd) {
 
     const cardStartMs = new Date(card.clockIn.dateTime).getTime();
     const cardEndMs = card.clockOut ? new Date(card.clockOut.dateTime).getTime() : Date.now();
-    if (newStart.getTime() < cardStartMs || newEnd.getTime() > cardEndMs) {
+    if (newStart.getTime() < cardStartMs || (newEnd ?? newStart).getTime() > cardEndMs) {
         toast('Break must stay within the timecard range', 'error');
         renderWeeks();
         return;
     }
-    if (newEnd <= newStart) {
+    if (newEnd && newEnd <= newStart) {
         toast('Break end must be after break start', 'error');
         renderWeeks();
         return;
@@ -1662,7 +1475,7 @@ async function persistBreakTimeUpdate(card, breakIndex, newStart, newEnd) {
     const breaks = cloneCardBreaks(card.breaks);
     if (!breaks[breakIndex]) { renderWeeks(); return; }
     breaks[breakIndex].start = { ...(breaks[breakIndex].start || {}), dateTime: newStart.toISOString() };
-    breaks[breakIndex].end = { ...(breaks[breakIndex].end || {}), dateTime: newEnd.toISOString() };
+    breaks[breakIndex].end = newEnd ? { ...(breaks[breakIndex].end || {}), dateTime: newEnd.toISOString() } : null;
     const updatedCard = buildUpdatedCard(card, { breaks });
 
     try {
@@ -1671,7 +1484,7 @@ async function persistBreakTimeUpdate(card, breakIndex, newStart, newEnd) {
             body: JSON.stringify(buildTimeCardUpdateBody(updatedCard)),
         });
         applyUpdatedCardLocally(resolveUpdatedTimeCard(response, updatedCard, 'Break update'));
-        toast(`Break updated: ${fmtTime(newStart)} → ${fmtTime(newEnd)}`, 'success');
+        toast(`Break updated: ${fmtTime(newStart)} → ${newEnd ? fmtTime(newEnd) : 'ongoing'}`, 'success');
     } catch (e) {
         toast('Break update failed: ' + e.message, 'error');
         renderWeeks();
@@ -1727,13 +1540,10 @@ function updateLiveClockDisplays() {
 }
 
 function updateVisibleDayTotals(cards) {
-    const totalsByDay = new Map();
-    cards.forEach(card => {
-        const anchorDateTime = getCardAnchorDateTime(card);
-        if (!anchorDateTime) return;
-        const dayStartMs = getDayStart(new Date(anchorDateTime)).getTime();
-        totalsByDay.set(dayStartMs, (totalsByDay.get(dayStartMs) || 0) + workedMs(card));
-    });
+    const totalsByDay = new Map(groupByDay(cards).map(group => [
+        group.dayStart.getTime(),
+        group.cards.reduce((sum, card) => sum + workedMs(card), 0),
+    ]));
     document.querySelectorAll('.day-section').forEach(section => {
         const totalEl = section.querySelector('.day-section-total');
         if (!totalEl) return;
@@ -1776,29 +1586,33 @@ function updateLiveTimelineBlock(block) {
     block.title = `${fmtDateTime(new Date(startMs))} (active)`;
 }
 
-function getCardSortMs(card) {
-    if (card.clockOut?.dateTime) return new Date(card.clockOut.dateTime).getTime();
-    if (card.clockIn?.dateTime) return new Date(card.clockIn.dateTime).getTime();
-    return card.createdDateTime ? new Date(card.createdDateTime).getTime() : 0;
+function ensureSelectedWeek() {
+    selectedWeekStart = getResolvedWeekStart();
 }
 
-function ensureSelectedWeek() {
-    if (selectedWeekStart instanceof Date && !Number.isNaN(selectedWeekStart.getTime())) {
-        selectedWeekStart = getWeekStart(selectedWeekStart);
-        return;
-    }
-    const stored = localStorage.getItem(SESSION_KEY_SELECTED_WEEK);
-    if (stored) {
-        const parsed = new Date(`${stored}T00:00:00`);
-        if (!Number.isNaN(parsed.getTime())) { selectedWeekStart = getWeekStart(parsed); return; }
-    }
-    const fallback = activeTimeCard?.clockIn?.dateTime ? new Date(activeTimeCard.clockIn.dateTime) : new Date();
-    selectedWeekStart = getWeekStart(fallback);
+// A chosen week holds only while the user is around: after an hour without a click or key
+// (a new sign-in, a tab left open over the weekend) the app returns to the current week.
+function noteActivity() {
+    sessionStorage.setItem(SESSION_KEY_LAST_ACTIVITY, String(Date.now()));
+}
+
+function isIdle() {
+    const lastActivityAt = Number(sessionStorage.getItem(SESSION_KEY_LAST_ACTIVITY)) || 0;
+    return Date.now() - lastActivityAt > WEEK_RESET_IDLE_MS;
+}
+
+function returnToCurrentWeekIfIdle() {
+    if (!isIdle()) return false;
+    const currentWeekStart = getWeekStart(new Date());
+    if (selectedWeekStart?.getTime() === currentWeekStart.getTime()) return false;
+    selectedWeekStart = currentWeekStart;
+    persistSelectedWeek();
+    return true;
 }
 
 function shiftSelectedWeek(days) {
     ensureSelectedWeek();
-    selectedWeekStart = getWeekStart(new Date(selectedWeekStart.getTime() + (days * DAY_MS)));
+    selectedWeekStart = getWeekStart(addDays(selectedWeekStart, days));
     persistSelectedWeek();
     renderWeeks();
     void loadTimeCards();
@@ -1817,43 +1631,15 @@ function onWeekPickerChange() {
 
 function persistSelectedWeek() {
     if (!selectedWeekStart) return;
-    localStorage.setItem(SESSION_KEY_SELECTED_WEEK, formatDateInputValue(selectedWeekStart));
+    sessionStorage.setItem(SESSION_KEY_SELECTED_WEEK, formatDateInputValue(selectedWeekStart));
     syncWeekControls();
 }
 
 function syncWeekControls() {
     ensureSelectedWeek();
-    const weekEnd = new Date(selectedWeekStart.getTime() + (6 * DAY_MS));
+    const weekEnd = addDays(selectedWeekStart, 6);
     weekPicker.value = formatDateInputValue(selectedWeekStart);
     weekRangeLabel.textContent = `${fmtDate(selectedWeekStart)} — ${fmtDate(weekEnd)}`;
-}
-
-export function formatDateInputValue(date) {
-    const year = date.getFullYear();
-    const month = `${date.getMonth() + 1}`.padStart(2, '0');
-    const day = `${date.getDate()}`.padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-export function workedMs(card) {
-    if (!card.clockIn) return 0;
-    const start = new Date(card.clockIn.dateTime).getTime();
-    const end = card.clockOut ? new Date(card.clockOut.dateTime).getTime() : Date.now();
-    const breakMs = card.breaks.reduce((sum, b) => {
-        if (!b.start) return sum;
-        const bs = new Date(b.start.dateTime).getTime();
-        const be = b.end ? new Date(b.end.dateTime).getTime() : Date.now();
-        return sum + (be - bs);
-    }, 0);
-    return Math.max(0, end - start - breakMs);
-}
-
-export function formatDurationHms(durationMs) {
-    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 const dateTimeFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
@@ -1868,7 +1654,3 @@ function fmtTime(d) { return timeFmt.format(d); }
 function fmtHour(d) { return hourFmt.format(d); }
 function fmtDayShort(d) { return dayShortFmt.format(d); }
 
-function toLocalDatetimeInput(d) {
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
