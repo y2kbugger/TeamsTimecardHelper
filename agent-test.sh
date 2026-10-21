@@ -23,7 +23,11 @@ run_unit() {
         echo "ok unit tests: $pass passed"
     else
         echo "FAIL unit tests: $pass passed, $fail failed"
-        grep -A12 '^not ok ' <<<"$out" | grep -E "^not ok|error:|expected:|actual:|at .*core" | head -40
+        # Each failure: its line, then the indented YAML block's error text, up to its location.
+        awk '/^not ok / { print; inblock = 1; next }
+             inblock && /^  (code|name|stack|expected|actual|operator):/ { inblock = 0 }
+             inblock && /^ok / { inblock = 0 }
+             inblock && !/^  (---|duration_ms|type|failureType)/ { print }' <<<"$out" | head -60
         status=1
     fi
 }

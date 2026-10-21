@@ -1,6 +1,11 @@
 // Pure logic: no DOM, no storage, no network. Unit-tested by `node --test` (tests/core.test.js).
 
-export const SNAP_MINUTES = 5;
+export const SNAP_MS = 5 * 60 * 1000;
+
+// For our own bugs: what this code derived itself. Input from Graph or a user is validated instead.
+export function assert(condition, message) {
+    if (!condition) throw new Error(`Assertion failed: ${message}`);
+}
 
 // ── Calendar ────────────────────────────────────────────────────────────────
 // Calendar days, never 24h steps: daylight saving days are 23 or 25 hours long.
@@ -54,8 +59,12 @@ export function parseLocalDate(value) {
 }
 
 export function snapMs(ms) {
-    const snap = SNAP_MINUTES * 60 * 1000;
-    return Math.round(ms / snap) * snap;
+    return Math.round(ms / SNAP_MS) * SNAP_MS;
+}
+
+export function clamp(value, min, max) {
+    assert(min <= max, `clamp bounds ${min} <= ${max}`);
+    return Math.min(Math.max(value, min), max);
 }
 
 export function formatDurationHms(durationMs) {
@@ -144,18 +153,118 @@ export function workedMs(card, nowMs = Date.now()) {
     return Math.max(0, cardEndMs(card, nowMs) - cardStartMs(card) - breakMs);
 }
 
-// Cards grouped by the local day they clocked in, newest day first.
-export function groupByDay(cards) {
-    const days = new Map();
-    cards.forEach(card => {
-        const anchor = card.clockIn?.dateTime || card.createdDateTime;
-        if (!anchor) return;
-        const dayStart = getDayStart(new Date(anchor));
-        const key = dayStart.getTime();
-        if (!days.has(key)) days.set(key, { dayStart, cards: [] });
-        days.get(key).cards.push(card);
-    });
-    return Array.from(days.values()).sort((a, b) => b.dayStart - a.dayStart);
+// The days of a week that have anything to show, newest first. A card is listed on the day it
+// clocked in and drawn on every day it spans (one past midnight shows on both). Worked time is
+// split at midnight, so the day totals add up to the week's.
+export function buildWeekDays(cards, weekStart, nowMs = Date.now()) {
+    const weekStartMs = weekStart.getTime();
+    const weekEndMs = addDays(weekStart, 7).getTime();
+    const actuals = buildDailyActuals(cards, weekStartMs, Math.min(weekEndMs, nowMs), nowMs);
+    const days = [];
+    for (let dayIndex = 6; dayIndex >= 0; dayIndex -= 1) {
+        const dayStart = addDays(weekStart, dayIndex);
+        const dayStartMs = dayStart.getTime();
+        const dayEndMs = addDays(dayStart, 1).getTime();
+        const listed = cards
+            .filter(card => card.clockIn && isSameDay(new Date(card.clockIn.dateTime), dayStart))
+            .sort((a, b) => getCardSortMs(b) - getCardSortMs(a));
+        const drawn = cards.filter(card => card.clockIn
+            && cardStartMs(card) < dayEndMs && cardEndMs(card, nowMs) > dayStartMs);
+        if (!listed.length && !drawn.length) continue;
+        const workedMs = actuals.get(formatDateInputValue(dayStart)) || 0;
+        days.push({ dayStart, dayStartMs, dayEndMs, listed, drawn, workedMs });
+    }
+    return days;
+}
+
+// ── Dragging an edge ────────────────────────────────────────────────────────
+// target: { breakIndex: null } for the card itself, or the index of one of its breaks.
+// edge: 'start' or 'end'. A running card or an ongoing break has no end to drag.
+
+function breakSpans(card, nowMs) {
+    return card.breaks
+        .map((b, index) => ({ index, startMs: ms(b.start), endMs: b.end ? ms(b.end) : nowMs }))
+        .filter(span => Number.isFinite(span.startMs))
+        .sort((a, b) => a.startMs - b.startMs);
+}
+
+// How far an edge may move, keeping the card valid: breaks inside the card, apart from each
+// other, nothing shorter than one snap, nothing ending in the future. Null when it cannot move.
+export function dragBounds(card, breakIndex, edge, nowMs = Date.now()) {
+    const startMs = cardStartMs(card);
+    const endMs = cardEndMs(card, nowMs);
+    const spans = breakSpans(card, nowMs);
+    let bounds;
+    if (breakIndex === null) {
+        if (edge === 'end' && !card.clockOut) return null;
+        bounds = edge === 'start'
+            ? { minMs: -Infinity, maxMs: Math.min(spans[0]?.startMs ?? Infinity, endMs - SNAP_MS) }
+            : { minMs: Math.max(startMs + SNAP_MS, spans.at(-1)?.endMs ?? -Infinity), maxMs: nowMs };
+    } else {
+        const position = spans.findIndex(span => span.index === breakIndex);
+        assert(position !== -1, `break ${breakIndex} exists`);
+        const span = spans[position];
+        if (edge === 'end' && !card.breaks[breakIndex].end) return null;
+        bounds = edge === 'start'
+            ? { minMs: Math.max(startMs, spans[position - 1]?.endMs ?? -Infinity), maxMs: span.endMs - SNAP_MS }
+            : { minMs: span.startMs + SNAP_MS, maxMs: Math.min(spans[position + 1]?.startMs ?? Infinity, endMs) };
+    }
+    return bounds.minMs <= bounds.maxMs ? bounds : null;
+}
+
+// The edge moved to `targetMs`, snapped and held within its bounds; null when it cannot move.
+export function applyDrag(card, breakIndex, edge, targetMs, nowMs = Date.now()) {
+    const bounds = dragBounds(card, breakIndex, edge, nowMs);
+    if (!bounds) return null;
+    const movedMs = clamp(snapMs(targetMs), bounds.minMs, bounds.maxMs);
+    const moved = new Date(movedMs);
+    if (breakIndex === null) {
+        return { movedMs, card: buildUpdatedCard(card, edge === 'start' ? { clockIn: moved } : { clockOut: moved }) };
+    }
+    const breaks = cloneCardBreaks(card.breaks);
+    breaks[breakIndex][edge] = { ...(breaks[breakIndex][edge] || {}), dateTime: moved.toISOString() };
+    return { movedMs, card: buildUpdatedCard(card, { breaks }) };
+}
+
+// ── The edit dialog ─────────────────────────────────────────────────────────
+
+// A datetime-local value, or the original timestamp when the value is unchanged: the input has
+// minute precision, and an untouched field must not lose its seconds.
+function readDatetimeInput(value, originalIso) {
+    if (!value) return null;
+    if (originalIso && toLocalDatetimeInput(new Date(originalIso)) === value) return new Date(originalIso);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+// form: { clockIn, clockOut, notes, breaks: [{ breakId, start, end }] } as the inputs hold them.
+// Returns { changes } for buildUpdatedCard, or { error } saying what to fix.
+export function readEditForm(card, form) {
+    const clockIn = readDatetimeInput(form.clockIn, card.clockIn?.dateTime);
+    const clockOut = readDatetimeInput(form.clockOut, card.clockOut?.dateTime);
+    if (!clockIn) return { error: 'Clock-in time is required.' };
+    if (clockOut === undefined) return { error: 'Clock-out is not a valid time.' };
+    if (clockOut && clockOut <= clockIn) return { error: 'Clock-out must be after clock-in.' };
+
+    const breaks = [];
+    for (const row of form.breaks) {
+        if (!row.start && !row.end) continue;
+        const original = card.breaks.find(b => b.breakId && b.breakId === row.breakId);
+        const start = readDatetimeInput(row.start, original?.start?.dateTime);
+        const end = readDatetimeInput(row.end, original?.end?.dateTime);
+        if (!start) return { error: 'Every break needs a start.' };
+        if (end === undefined) return { error: 'A break end is not a valid time.' };
+        if (start < clockIn || (clockOut && start >= clockOut)) return { error: 'Break start must be within the card.' };
+        if (end && end <= start) return { error: 'Break end must be after break start.' };
+        if (end && clockOut && end > clockOut) return { error: 'Break end must be within the card.' };
+        if (!end && clockOut) return { error: 'Only a running card can have a break without an end.' };
+        breaks.push({ breakId: row.breakId || undefined, start: { dateTime: start.toISOString() }, end: end ? { dateTime: end.toISOString() } : null });
+    }
+    const sorted = [...breaks].sort((a, b) => ms(a.start) - ms(b.start));
+    for (let i = 1; i < sorted.length; i += 1) {
+        if (!sorted[i - 1].end || ms(sorted[i - 1].end) > ms(sorted[i].start)) return { error: 'Breaks must not overlap.' };
+    }
+    return { changes: { clockIn, clockOut, breaks, notes: form.notes.trim() } };
 }
 
 export function cloneCardBreaks(breaks) {
@@ -240,14 +349,16 @@ export function getWorkSegments(card, nowMs) {
 }
 
 // Worked ms per local day ('YYYY-MM-DD'), split at midnights, within [rangeStartMs, rangeEndMs).
-export function buildDailyActuals(cards, rangeStartMs, rangeEndMs) {
+// A running card or an ongoing break runs until nowMs.
+export function buildDailyActuals(cards, rangeStartMs, rangeEndMs, nowMs = rangeEndMs) {
     const totals = new Map();
-    cards.forEach(card => getWorkSegments(card, rangeEndMs).forEach(([segmentStartMs, segmentEndMs]) => {
+    cards.forEach(card => getWorkSegments(card, nowMs).forEach(([segmentStartMs, segmentEndMs]) => {
         let cursorMs = Math.max(segmentStartMs, rangeStartMs);
         const endMs = Math.min(segmentEndMs, rangeEndMs);
         while (cursorMs < endMs) {
             const dayStart = getDayStart(cursorMs);
             const sliceEndMs = Math.min(endMs, addDays(dayStart, 1).getTime());
+            assert(sliceEndMs > cursorMs, 'each day slice moves forward');
             const key = formatDateInputValue(dayStart);
             totals.set(key, (totals.get(key) || 0) + (sliceEndMs - cursorMs));
             cursorMs = sliceEndMs;

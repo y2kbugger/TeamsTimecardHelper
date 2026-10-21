@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
-    filterCardsForWeek, findActiveCard, groupByDay, buildUpdatedCard, buildTimeCardUpdateBody,
+    filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
     buildProjectedTimelineUpdate, getWorkSegments, buildDailyActuals, buildWeeklyModel,
+    dragBounds, applyDrag, readEditForm, SNAP_MS,
 } from '../core.js';
 
 const local = s => new Date(s); // 'YYYY-MM-DDTHH:MM' parses as local time
@@ -86,13 +87,94 @@ test('week filter keeps overlapping cards, active card is the newest open one', 
     assert.equal(findActiveCard(cards.slice(0, 3)), null);
 });
 
-test('day groups are newest first', () => {
-    const groups = groupByDay([
+test('week days: newest first, cards listed newest first on their clock-in day', () => {
+    const days = buildWeekDays([
         card({ id: 'a', clockIn: '2026-10-19T09:00', clockOut: '2026-10-19T10:00' }),
         card({ id: 'b', clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T10:00' }),
         card({ id: 'c', clockIn: '2026-10-19T13:00', clockOut: '2026-10-19T14:00' }),
-    ]);
-    assert.deepEqual(groups.map(g => [day(g.dayStart), g.cards.map(c => c.id).join('')]), [['2026-10-21', 'b'], ['2026-10-19', 'ac']]);
+    ], parseLocalDate('2026-10-18'), local('2026-10-22T00:00').getTime());
+    assert.deepEqual(days.map(d => [day(d.dayStart), d.listed.map(c => c.id).join(''), d.workedMs / 3600e3]),
+        [['2026-10-21', 'b', 1], ['2026-10-19', 'ca', 2]]);
+});
+
+test('week days: a card past midnight is drawn on both days and its time split between them', () => {
+    const days = buildWeekDays([card({ id: 'late', clockIn: '2026-10-19T22:00', clockOut: '2026-10-20T01:00' })],
+        parseLocalDate('2026-10-18'), local('2026-10-22T00:00').getTime());
+    assert.deepEqual(days.map(d => [day(d.dayStart), d.listed.length, d.drawn.length, d.workedMs / 3600e3]),
+        [['2026-10-20', 0, 1, 1], ['2026-10-19', 1, 1, 2]]);
+});
+
+test('week days: a running card counts up to now', () => {
+    const [today] = buildWeekDays([card({ clockIn: '2026-10-21T09:00' })], parseLocalDate('2026-10-18'), local('2026-10-21T10:30').getTime());
+    assert.equal(today.workedMs, 1.5 * 3600e3);
+});
+
+test('drag: snaps to 5 minutes and stays inside its neighbours', () => {
+    const now = local('2026-10-21T18:00').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', breaks: [['2026-10-21T10:00', '2026-10-21T10:15']] });
+    const at = s => local(s).getTime();
+    assert.equal(applyDrag(c, null, 'start', at('2026-10-21T08:41'), now).movedMs, at('2026-10-21T08:40'));
+    assert.equal(applyDrag(c, null, 'start', at('2026-10-21T10:30'), now).movedMs, at('2026-10-21T10:00'), 'not past the break');
+    assert.equal(applyDrag(c, null, 'end', at('2026-10-21T10:05'), now).movedMs, at('2026-10-21T10:15'), 'not before the break ends');
+    assert.equal(applyDrag(c, null, 'end', at('2026-10-21T19:00'), now).movedMs, now, 'not into the future');
+    assert.equal(applyDrag(c, 0, 'start', at('2026-10-21T08:00'), now).movedMs, at('2026-10-21T09:00'), 'not before clock-in');
+    assert.equal(applyDrag(c, 0, 'end', at('2026-10-21T10:01'), now).movedMs, at('2026-10-21T10:05'), 'at least one snap long');
+    const moved = applyDrag(c, 0, 'end', at('2026-10-21T10:30'), now).card;
+    assert.equal(moved.breaks[0].breakId, 'b0');
+    assert.equal(moved.breaks[0].end.dateTime, local('2026-10-21T10:30').toISOString());
+    assert.equal(c.breaks[0].end.dateTime, local('2026-10-21T10:15').toISOString(), 'the original is untouched');
+});
+
+test('drag: a running card and an ongoing break have no end to drag', () => {
+    const now = local('2026-10-21T12:00').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00', breaks: [['2026-10-21T10:00', '2026-10-21T10:15'], ['2026-10-21T11:00', null]] });
+    assert.equal(dragBounds(c, null, 'end', now), null);
+    assert.equal(dragBounds(c, 1, 'end', now), null);
+    assert.equal(dragBounds(c, 1, 'start', now).minMs, local('2026-10-21T10:15').getTime(), 'after the break before it');
+    const moved = applyDrag(c, 1, 'start', local('2026-10-21T10:50').getTime(), now).card;
+    assert.equal(moved.breaks[1].end, null, 'the ongoing break keeps going');
+    assert.equal(moved.state, 'onBreak');
+});
+
+test('drag: an edge with no room to move refuses', () => {
+    const now = local('2026-10-21T12:00').getTime();
+    const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T09:03', breaks: [['2026-10-21T09:01', '2026-10-21T09:02']] });
+    assert.equal(dragBounds(c, 0, 'start', now), null);
+    assert.equal(applyDrag(c, 0, 'start', now, now), null);
+    assert.ok(dragBounds(c, null, 'end', now), 'the card itself can still grow');
+});
+
+test('edit form: unchanged fields keep their seconds', () => {
+    const c = normalizeCard({ id: 'c', clockInEvent: { dateTime: '2026-10-21T13:00:42.000Z' }, clockOutEvent: { dateTime: '2026-10-21T15:00:17.000Z' }, breaks: [] });
+    const form = { clockIn: toLocalDatetimeInput(new Date(c.clockIn.dateTime)), clockOut: toLocalDatetimeInput(new Date(c.clockOut.dateTime)), notes: ' hi ', breaks: [] };
+    const { changes } = readEditForm(c, form);
+    assert.equal(changes.clockIn.toISOString(), '2026-10-21T13:00:42.000Z');
+    assert.equal(changes.clockOut.toISOString(), '2026-10-21T15:00:17.000Z');
+    assert.equal(changes.notes, 'hi');
+});
+
+test('edit form: refuses what would make a bad card', () => {
+    const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', breaks: [['2026-10-21T10:00', '2026-10-21T10:15']] });
+    const form = (over = {}) => ({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', notes: '', breaks: [{ breakId: 'b0', start: '2026-10-21T10:00', end: '2026-10-21T10:15' }], ...over });
+    const error = over => readEditForm(c, form(over)).error;
+    assert.equal(error({}), undefined);
+    assert.match(error({ clockIn: '' }), /Clock-in time is required/);
+    assert.match(error({ clockOut: '2026-10-21T08:00' }), /Clock-out must be after/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T08:30', end: '2026-10-21T09:30' }] }), /Break start must be within/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T11:00', end: '2026-10-21T12:30' }] }), /Break end must be within/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T11:00', end: '2026-10-21T10:30' }] }), /Break end must be after/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T11:00', end: '' }] }), /without an end/);
+    assert.match(error({ breaks: [{ start: '', end: '2026-10-21T11:00' }] }), /needs a start/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T10:00', end: '2026-10-21T10:30' }, { start: '2026-10-21T10:20', end: '2026-10-21T10:40' }] }), /must not overlap/);
+});
+
+test('edit form: a running card may keep an ongoing break; empty rows are dropped', () => {
+    const c = card({ clockIn: '2026-10-21T09:00', breaks: [['2026-10-21T10:00', null]] });
+    const { changes } = readEditForm(c, { clockIn: '2026-10-21T09:00', clockOut: '', notes: '', breaks: [{ breakId: 'b0', start: '2026-10-21T10:00', end: '' }, { start: '', end: '' }] });
+    assert.equal(changes.clockOut, null);
+    assert.equal(changes.breaks.length, 1);
+    assert.equal(changes.breaks[0].breakId, 'b0');
+    assert.equal(changes.breaks[0].end, null);
 });
 
 test('update body omits clock-out on an open card and keeps break ids', () => {

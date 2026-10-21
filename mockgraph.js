@@ -89,7 +89,7 @@ export async function mockGraphFetch(url, options = {}) {
     const db = readDb();
     const now = new Date().toISOString();
     const nowEvent = () => ({ dateTime: now, atApprovedLocation: Boolean(body?.atApprovedLocation), notes: body?.notes || null });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await Promise.resolve(); // answer later, as a network does, but on no timer
 
     if (method === 'GET' && path === '/me/joinedTeams') return { value: [MOCK_TEAM] };
 

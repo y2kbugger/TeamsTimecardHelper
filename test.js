@@ -1,276 +1,210 @@
+// Browser tests. Live (signed in, real Graph): probes of how the tenant's Graph behaves. Mock
+// (?mock): the real app in an iframe against mockgraph.js, driven as a user would. On localhost
+// the condensed result goes to the dev server (.agent/browser-tests.txt or mock-tests.txt).
 import * as auth from './auth.js';
-import {
-    fetchJoinedTeams,
-    fetchWeekTimeCards,
-    buildTimeCardsPageUrl,
-    getTeamCache,
-    getWeekRange,
-    STORAGE_KEYS,
-} from './app.js';
-import { formatDateInputValue } from './core.js';
+import { fetchJoinedTeams, fetchWeekTimeCards, STORAGE_KEYS } from './app.js';
+import { addDays, formatDateInputValue, getWeekRange } from './core.js';
 import { $, reportToDevServer } from './ui.js';
 import { mockCards, mockEnabled, mockGraphFetch, MOCK_TEAM, seedMockDb } from './mockgraph.js';
 
-const SESSION_KEY_SELECTED_TEAM_ID = STORAGE_KEYS.selectedTeamId;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const WAIT_TIMEOUT_MS = 5000;
+const WAIT_POLL_MS = 20;
 
-function parseParams() {
-    const params = new URLSearchParams(window.location.search);
-    return {
-        test: (params.get('test') || 'all').trim(),
-        teamId: (params.get('teamId') || '').trim(),
-        week: (params.get('week') || '').trim(),
-    };
-}
-
-function formatJson(value) {
-    return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-}
-
-function formatAccount(account) {
-    if (!account) return 'not signed in';
-    return `${account.name || account.username || 'signed in'} (${account.username || account.homeAccountId || 'no identifier'})`;
-}
-
-function setAuthStatus(session) {
-    const authStatus = $('test-auth-status');
-    const signInButton = $('btn-test-signin');
-    const signOutButton = $('btn-test-signout');
-    if (!authStatus || !signInButton || !signOutButton) return;
-    authStatus.textContent = session.authenticated
-        ? `Authenticated: ${formatAccount(session.account)}`
-        : 'Authenticated: no';
-    signInButton.style.display = session.authenticated ? 'none' : 'inline-flex';
-    signOutButton.style.display = session.authenticated ? 'inline-flex' : 'none';
-}
-
-function renderMeta(params) {
-    const meta = $('test-meta');
-    if (!meta) return;
-    const queryBits = [`test=${params.test}`];
-    if (params.teamId) queryBits.push(`teamId=${params.teamId}`);
-    if (params.week) queryBits.push(`week=${params.week}`);
-    const names = tests.map(t => t.name).join(', ');
-    meta.textContent = `Run one test with ?test=<name>. Available: ${names}. Current query: ${queryBits.join('&')}`;
-}
-
-function renderSummary(message) {
-    const summary = $('test-summary');
-    if (summary) summary.textContent = message;
-}
-
-function createResultRow(name) {
-    const results = $('test-results');
-    const row = document.createElement('section');
-    row.className = 'test-result test-result-running';
-    row.innerHTML = `
-    <div class="test-result-name">${name}</div>
-    <div class="test-result-body">running…</div>
-  `;
-    results.appendChild(row);
-    return row;
-}
-
-function updateResultRow(row, status, details) {
-    row.className = `test-result test-result-${status}`;
-    const body = row.querySelector('.test-result-body');
-    if (body) body.textContent = formatJson(details);
-}
-
-// ─────────────────────────────────────────────
-// Probes (Microsoft Graph contract verification)
-// These are verification-only; production code never runs them.
-// ─────────────────────────────────────────────
-function buildTimeCardFilterUrl(teamId, filterExpr, pageSize = 1) {
-    return `/teams/${teamId}/schedule/timeCards?$top=${pageSize}&$filter=${encodeURIComponent(filterExpr)}`;
-}
-
-function isRejectedFilterError(message) {
-    return /filter|unsupported|not allowed|could not find a property|invalid|orderby|order by|sort/i.test(message || '');
-}
-
-function escapeODataLiteral(value) {
-    return String(value || '').replace(/'/g, "''");
-}
-
-async function probeFilterExpression(teamId, expression) {
-    try {
-        await auth.graphFetch(buildTimeCardFilterUrl(teamId, expression));
-        return { supported: true, message: 'Graph accepted the filter.' };
-    } catch (error) {
-        const message = error?.message || 'Unknown Graph error';
-        if (isRejectedFilterError(message)) return { supported: false, message };
-        return { supported: null, message };
-    }
-}
-
-async function probeFilterAlternatives(teamId, label, expressions) {
-    let lastMessage = '';
-    for (const expression of expressions) {
-        const r = await probeFilterExpression(teamId, expression);
-        if (r.supported === true) {
-            return { label, supported: true, acceptedExpression: expression, triedExpressions: expressions, message: r.message };
-        }
-        if (r.supported === null) {
-            return { label, supported: null, acceptedExpression: null, triedExpressions: expressions, message: r.message };
-        }
-        lastMessage = r.message;
-    }
-    return { label, supported: false, acceptedExpression: null, triedExpressions: expressions, message: lastMessage || 'Rejected.' };
-}
-
-async function probeDocumentedFilterMatrix(teamId) {
-    const account = auth.getCurrentAccount();
-    const userId = account?.localAccountId || account?.homeAccountId || '00000000-0000-0000-0000-000000000000';
-    const now = Date.now();
-    const lowerBoundIso = new Date(now - 30 * DAY_MS).toISOString();
-    const upperBoundIso = new Date(now + DAY_MS).toISOString();
-
-    const definitions = [
-        { key: 'clockInGe', label: 'clockInEvent/dateTime ge', expressions: [`clockInEvent/dateTime ge ${lowerBoundIso}`, `clockInEvent/datetime ge ${lowerBoundIso}`] },
-        { key: 'clockInLe', label: 'clockInEvent/dateTime le', expressions: [`clockInEvent/dateTime le ${upperBoundIso}`, `clockInEvent/datetime le ${upperBoundIso}`] },
-        { key: 'clockOutGe', label: 'clockOutEvent/dateTime ge', expressions: [`clockOutEvent/dateTime ge ${lowerBoundIso}`, `clockOutEvent/datetime ge ${lowerBoundIso}`] },
-        { key: 'clockOutLe', label: 'clockOutEvent/dateTime le', expressions: [`clockOutEvent/dateTime le ${upperBoundIso}`, `clockOutEvent/datetime le ${upperBoundIso}`] },
-        { key: 'stateEq', label: 'state eq', expressions: ["state eq 'clockedIn'"] },
-        { key: 'userIdEq', label: 'userId eq', expressions: [`userId eq '${escapeODataLiteral(userId)}'`] },
-    ];
-
-    const entries = await Promise.all(definitions.map(async d => ({
-        key: d.key,
-        result: await probeFilterAlternatives(teamId, d.label, d.expressions),
-    })));
-
-    const matrix = { checkedAt: new Date().toISOString() };
-    entries.forEach(e => { matrix[e.key] = e.result; });
-    return matrix;
-}
-
-async function probeLastModifiedFilter(teamId) {
-    const r = await probeFilterExpression(teamId, 'lastModifiedDateTime ge 1970-01-01T00:00:00Z');
-    return r.supported;
-}
-
-async function probeLastModifiedOrderBy(teamId) {
-    const url = `/teams/${teamId}/schedule/timeCards?$top=1&$orderby=${encodeURIComponent('lastModifiedDateTime desc')}`;
-    try {
-        await auth.graphFetch(url);
-        return true;
-    } catch (error) {
-        const message = error?.message || '';
-        if (/lastmodifieddatetime|orderby|order by|sort|not allowed|unsupported/i.test(message)) return false;
-        return null;
-    }
-}
-
-async function probeCombinedWeekQuery(teamId, weekStartInput) {
-    const { weekStart, weekEndInclusive } = getWeekRange(weekStartInput);
-    const filterExpr = `((clockInEvent/dateTime le ${weekEndInclusive.toISOString()} and clockOutEvent/dateTime ge ${weekStart.toISOString()}) or state eq 'clockedIn' or state eq 'onBreak')`;
-    const r = await probeFilterExpression(teamId, filterExpr);
-    return r.supported;
-}
-
-// ─────────────────────────────────────────────
-// Test helpers
-// ─────────────────────────────────────────────
-function summarizeCard(card) {
-    if (!card) return null;
-    const breaks = card.breaks || [];
-    return {
-        id: card.id || null,
-        state: card.state || null,
-        clockIn: card.clockIn?.dateTime || null,
-        clockOut: card.clockOut?.dateTime || null,
-        breakCount: breaks.length,
-        openBreakCount: breaks.filter(b => b.start && !b.end).length,
-        lastModifiedDateTime: card.lastModifiedDateTime || null,
-    };
-}
-
-function assertProbeRejected(supported, label) {
-    if (supported !== false) throw new Error(`Expected ${label} to be rejected, got ${supported}`);
-    return supported;
-}
-
-function assertDocumentedFilterSupport(matrix) {
-    const required = ['clockInGe', 'clockInLe', 'clockOutGe', 'clockOutLe', 'stateEq', 'userIdEq'];
-    const unsupported = required.filter(key => matrix?.[key]?.supported !== true).map(key => matrix?.[key]?.label || key);
-    if (unsupported.length) {
-        throw new Error(`Expected documented timecard filters to be supported: ${unsupported.join(', ')}`);
-    }
-    return matrix;
-}
-
-async function requireTeam(context) {
-    if (context.team) return context.team;
-    const teams = await fetchJoinedTeams();
-    context.teams = teams;
-    const savedId = context.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
-    context.team = teams.find(t => t.id === savedId) || teams[0] || null;
-    if (!context.team) throw new Error('No joined teams were available for the current account');
-    return context.team;
-}
-
-// ─────────────────────────────────────────────
-// Flows: the real app in an iframe, against the mock backend
-// ─────────────────────────────────────────────
 function check(condition, message) {
     if (!condition) throw new Error(message);
 }
 
-async function waitFor(describe, predicate, timeoutMs = 4000) {
-    const deadline = performance.now() + timeoutMs;
+// ── Live: Graph as this tenant behaves ──────────────────────────────────────
+
+const timeCardsUrl = (teamId, query) => `/teams/${teamId}/schedule/timeCards?${query}`;
+const isRejection = message => /filter|unsupported|not allowed|could not find a property|invalid|orderby|order by|sort/i.test(message || '');
+
+// true: Graph accepted the query; false: it refused it as unsupported; anything else throws.
+async function graphAccepts(url) {
+    try {
+        await auth.graphFetch(url);
+        return true;
+    } catch (error) {
+        if (isRejection(error.message)) return false;
+        throw error;
+    }
+}
+
+const filterAccepted = (teamId, filter) => graphAccepts(timeCardsUrl(teamId, `$top=1&$filter=${encodeURIComponent(filter)}`));
+
+async function liveTeam(context) {
+    context.team ||= await (async () => {
+        const teams = await fetchJoinedTeams();
+        const savedId = context.params.teamId || localStorage.getItem(STORAGE_KEYS.selectedTeamId);
+        const team = teams.find(t => t.id === savedId) || teams[0];
+        check(team, 'the account is in a team');
+        return team;
+    })();
+    return context.team;
+}
+
+const liveTests = [
+    {
+        name: 'auth-status',
+        run: async context => ({ account: context.session.account?.username || null, redirectUri: auth.getRuntimeConfig().redirectUri }),
+    },
+    {
+        name: 'joined-teams',
+        run: async () => {
+            const teams = await fetchJoinedTeams();
+            check(teams.length, 'at least one team');
+            return { count: teams.length };
+        },
+    },
+    {
+        name: 'documented-filters-accepted',
+        run: async context => {
+            const team = await liveTeam(context);
+            const now = Date.now();
+            const before = new Date(now - 30 * 864e5).toISOString();
+            const after = new Date(now + 864e5).toISOString();
+            const filters = [
+                `clockInEvent/dateTime ge ${before}`, `clockInEvent/dateTime le ${after}`,
+                `clockOutEvent/dateTime ge ${before}`, `clockOutEvent/dateTime le ${after}`,
+                "state eq 'clockedIn'",
+            ];
+            const refused = [];
+            for (const filter of filters) if (!await filterAccepted(team.id, filter)) refused.push(filter);
+            check(!refused.length, `refused: ${refused.join('; ')}`);
+            return { accepted: filters.length };
+        },
+    },
+    {
+        name: 'or-in-filter-refused',
+        run: async context => {
+            const team = await liveTeam(context);
+            const { weekStart, weekEndInclusive } = getWeekRange(new Date());
+            const filter = `(clockInEvent/dateTime le ${weekEndInclusive.toISOString()} and clockOutEvent/dateTime ge ${weekStart.toISOString()}) or state eq 'clockedIn'`;
+            check(!await filterAccepted(team.id, filter), 'Graph now accepts `or`: the week could be one overlap query');
+            return { refused: true };
+        },
+    },
+    {
+        name: 'last-modified-unqueryable',
+        run: async context => {
+            const team = await liveTeam(context);
+            check(!await filterAccepted(team.id, 'lastModifiedDateTime ge 1970-01-01T00:00:00Z'), 'lastModifiedDateTime filters now work');
+            check(!await graphAccepts(timeCardsUrl(team.id, `$top=1&$orderby=${encodeURIComponent('lastModifiedDateTime desc')}`)), 'lastModifiedDateTime ordering now works');
+            return { refused: true };
+        },
+    },
+    {
+        name: 'week-fetch',
+        run: async context => {
+            const team = await liveTeam(context);
+            const startedAt = performance.now();
+            const week = await fetchWeekTimeCards(team.id, context.params.week || null);
+            return {
+                week: formatDateInputValue(week.weekStart),
+                cards: week.cards.length,
+                pages: week.pageCount,
+                durationMs: Math.round(performance.now() - startedAt),
+                running: Boolean(week.activeCard),
+            };
+        },
+    },
+];
+
+// ── Mock: the app, driven ───────────────────────────────────────────────────
+
+async function waitFor(describe, predicate) {
+    const deadline = performance.now() + WAIT_TIMEOUT_MS;
     for (;;) {
         const value = predicate();
         if (value) return value;
         if (performance.now() > deadline) throw new Error(`Timed out waiting for ${describe}`);
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await new Promise(resolve => setTimeout(resolve, WAIT_POLL_MS));
     }
 }
 
-// A fresh app on the seeded mock data, showing this week, already past its first render.
-async function openApp({ beforeLoad = () => { } } = {}) {
+// A fresh app on freshly seeded mock data, showing this week (or `week`), its first render done.
+async function openApp({ week = null, beforeLoad = async () => { } } = {}) {
     seedMockDb();
     sessionStorage.removeItem(auth.MOCK_EXPIRED_KEY);
+    sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
     sessionStorage.removeItem(STORAGE_KEYS.selectedWeek);
     sessionStorage.removeItem(STORAGE_KEYS.lastActivity);
-    sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
-    localStorage.setItem(SESSION_KEY_SELECTED_TEAM_ID, MOCK_TEAM.id);
+    if (week) {
+        sessionStorage.setItem(STORAGE_KEYS.selectedWeek, formatDateInputValue(week));
+        sessionStorage.setItem(STORAGE_KEYS.lastActivity, String(Date.now()));
+    }
+    localStorage.setItem(STORAGE_KEYS.selectedTeamId, MOCK_TEAM.id);
     await beforeLoad();
     const frame = document.createElement('iframe');
     frame.className = 'test-app-frame';
     frame.src = 'index.html';
     document.body.appendChild(frame);
     await new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
-    const doc = frame.contentDocument;
-    const app = {
-        doc,
-        $: selector => doc.querySelector(selector),
-        $$: selector => [...doc.querySelectorAll(selector)],
-        clockLabel: () => doc.getElementById('btn-clock').textContent,
-        weekLabel: () => doc.getElementById('week-range-label').textContent,
-        // Steps back a week and waits until that week's cards are on screen (the seed fills it).
-        async previousWeek() {
-            const label = this.weekLabel();
-            this.click('#btn-week-prev');
-            await waitFor('the previous week to load', () => this.weekLabel() !== label
-                && doc.getElementById('timecards-loading').style.display === 'none' && this.$$('.tc-row').length);
-        },
-        click(selector) {
-            const element = waitClickable(doc, selector);
-            element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-            element.click();
-        },
-        close: () => frame.remove(),
-    };
-    await waitFor('the first render', () => doc.getElementById('weeks-container')?.style.display === 'block');
+    const app = new AppDriver(frame);
+    await app.settled('the first render');
     return app;
 }
 
-function waitClickable(doc, selector) {
-    const element = doc.querySelector(selector);
-    if (!element) throw new Error(`No element matches ${selector}`);
-    if (element.disabled) throw new Error(`${selector} is disabled`);
-    return element;
+class AppDriver {
+    constructor(frame) {
+        this.frame = frame;
+        this.win = frame.contentWindow;
+        this.doc = frame.contentDocument;
+    }
+
+    $(selector) { return this.doc.querySelector(selector); }
+
+    $$(selector) { return [...this.doc.querySelectorAll(selector)]; }
+
+    clockLabel() { return this.doc.getElementById('btn-clock').textContent; }
+
+    weekLabel() { return this.doc.getElementById('week-range-label').textContent; }
+
+    // Nothing on its way to Graph and the week drawn.
+    settled(describe) {
+        return waitFor(describe, () => this.$('#busy')?.hidden && !this.$('#weeks')?.hidden);
+    }
+
+    click(selector) {
+        const element = typeof selector === 'string' ? this.$(selector) : selector;
+        check(element, `an element for ${selector}`);
+        check(!element.disabled, `${selector} is enabled`);
+        element.dispatchEvent(new this.win.PointerEvent('pointerdown', { bubbles: true }));
+        element.click();
+    }
+
+    async previousWeek() {
+        const label = this.weekLabel();
+        this.click('#btn-week-prev');
+        await waitFor('the previous week', () => this.weekLabel() !== label);
+        await this.settled('the previous week to load');
+    }
+
+    pointer(type, target, clientX) {
+        target.dispatchEvent(new this.win.PointerEvent(type, { bubbles: true, cancelable: true, clientX, clientY: 10, button: 0, pointerId: 7, isPrimary: true }));
+    }
+
+    // The x on a timeline for a local time of its day.
+    xAt(timeline, hours, minutes) {
+        const dayStartMs = Number(timeline.dataset.dayStartMs);
+        const dayEndMs = Number(timeline.dataset.dayEndMs);
+        const at = new Date(dayStartMs);
+        at.setHours(hours, minutes, 0, 0);
+        const rect = timeline.getBoundingClientRect();
+        return rect.left + rect.width * ((at.getTime() - dayStartMs) / (dayEndMs - dayStartMs));
+    }
+
+    // Presses an edge's handle and moves it to hh:mm of its day, without letting go.
+    grab(span, edge, hours, minutes) {
+        const handle = span.querySelector(`.resize-handle[data-edge="${edge}"]`);
+        check(handle, `a ${edge} handle`);
+        const rect = handle.getBoundingClientRect();
+        this.pointer('pointerdown', handle, rect.left + rect.width / 2);
+        this.pointer('pointermove', handle, this.xAt(span.parentElement, hours, minutes));
+        return handle;
+    }
+
+    close() { this.frame.remove(); }
 }
 
 async function withApp(run, options) {
@@ -280,388 +214,270 @@ async function withApp(run, options) {
 }
 
 const openMockCard = () => mockCards().find(card => card.state !== 'clockedOut');
+const localTime = iso => { const d = new Date(iso); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const lastWeek = () => addDays(new Date(), -7);
 
-const flowTests = [
+// The seeded card of a day last week (09:00-12:00, a break 10:30-10:45) and its timeline block.
+function seededBlock(app) {
+    const block = app.$('.tc-block[data-card-id^="seed-"]');
+    check(block, 'a seeded card on the timeline');
+    return { block, id: block.dataset.cardId, card: () => mockCards().find(c => c.id === block.dataset.cardId) };
+}
+
+const mockTests = [
     {
-        name: 'flow-clock-in-break-clock-out',
-        mode: 'mock',
+        name: 'clock-in-break-clock-out',
         run: () => withApp(async app => {
-            check(app.clockLabel() === 'Clock In', `starts clocked out, got ${app.clockLabel()}`);
+            check(app.clockLabel() === 'Clock In', `starts clocked out, not ${app.clockLabel()}`);
             app.click('#btn-clock');
             await waitFor('Clock Out', () => app.clockLabel() === 'Clock Out');
             check(openMockCard()?.state === 'clockedIn', 'the backend has an open card');
-
-            app.click('.break-row-control button');
+            app.click(await waitFor('Start Break', () => app.$('[data-action="startBreak"]')));
             await waitFor('On Break', () => app.clockLabel() === 'On Break');
-            check(app.$('#btn-clock').disabled, 'cannot clock out on break');
-            check(openMockCard()?.state === 'onBreak', 'the backend is on break');
-
-            (await waitFor('the End Break button', () => app.$$('.breaks-list button').find(b => b.textContent === 'End Break'))).click();
+            check(app.$('#btn-clock').disabled, 'no clocking out on a break');
+            app.click(await waitFor('End Break', () => app.$('[data-action="endBreak"]')));
             await waitFor('Clock Out again', () => app.clockLabel() === 'Clock Out');
-
             app.click('#btn-clock');
             await waitFor('Clock In again', () => app.clockLabel() === 'Clock In');
             const card = mockCards().at(-1);
-            check(card.state === 'clockedOut' && card.breaks.length === 1 && card.breaks[0].end, `backend card ends clocked out with one closed break: ${JSON.stringify(card)}`);
-            return { cards: mockCards().length };
-        }),
-    },
-    {
-        name: 'flow-past-week-still-shows-active-card',
-        mode: 'mock',
-        // The app starts on last week (a reload while there), so it never saw this week's open card.
-        run: () => withApp(async app => {
-            await waitFor('last week to load', () => app.$$('.tc-row').length);
-            await waitFor('Clock Out on a past week', () => app.clockLabel() === 'Clock Out');
-            return { week: app.weekLabel() };
-        }, {
-            beforeLoad: async () => {
-                const lastWeek = new Date();
-                lastWeek.setDate(lastWeek.getDate() - 7);
-                sessionStorage.setItem(STORAGE_KEYS.selectedWeek, formatDateInputValue(lastWeek));
-                sessionStorage.setItem(STORAGE_KEYS.lastActivity, String(Date.now()));
-                await mockGraphFetch(`/teams/${MOCK_TEAM.id}/schedule/timeCards/clockIn`, { method: 'POST', body: '{}' });
-            },
-        }),
-    },
-    {
-        name: 'flow-clock-in-from-past-week',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            await app.previousWeek();
-            const rowsBefore = app.$$('.tc-row').length;
-            app.click('#btn-clock');
-            await waitFor('Clock Out', () => app.clockLabel() === 'Clock Out');
-            check(app.$$('.tc-row').length === rowsBefore, 'the past week still shows its own cards');
-            check(!app.$('#btn-clock').disabled, 'the clock button is usable');
-            return { rows: rowsBefore };
-        }),
-    },
-    {
-        name: 'flow-edit-rejects-break-before-clock-in',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            const before = JSON.stringify(mockCards());
-            app.click('.tc-row [data-action="edit"]');
-            await waitFor('the edit dialog', () => !app.$('#edit-modal').classList.contains('hidden'));
-            const clockIn = app.$('#edit-clock-in').value;
-            const breakStart = app.$('.break-edit-row .break-start');
-            breakStart.value = `${clockIn.slice(0, 11)}00:05`;
-            app.click('#btn-edit-save');
-            await waitFor('the error toast', () => app.$$('.toast.error').some(t => /Break start/.test(t.textContent)));
-            check(JSON.stringify(mockCards()) === before, 'nothing was saved');
-            return { clockIn, breakStart: breakStart.value };
-        }),
-    },
-    {
-        name: 'flow-edit-saves-notes',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            const cardId = app.$('.tc-row').dataset.cardId;
-            app.click('.tc-row [data-action="edit"]');
-            await waitFor('the edit dialog', () => !app.$('#edit-modal').classList.contains('hidden'));
-            app.$('#edit-notes').value = 'flow note';
-            app.click('#btn-edit-save');
-            await waitFor('the dialog to close', () => app.$('#edit-modal').classList.contains('hidden'));
-            const card = mockCards().find(c => c.id === cardId);
-            check(card.notes?.content === 'flow note', `notes saved: ${JSON.stringify(card.notes)}`);
-            check(card.breaks.length === 1 && card.breaks[0].breakId, 'the break kept its id');
-            return { cardId };
-        }),
-    },
-    {
-        name: 'flow-delete-card',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            const cardId = app.$('.tc-row').dataset.cardId;
-            app.click('.tc-row [data-action="delete"]');
-            await waitFor('the confirm dialog', () => !app.$('#confirm-modal').classList.contains('hidden'));
-            app.click('#btn-confirm-ok');
-            await waitFor('the row to go', () => !app.$(`.tc-row[data-card-id="${cardId}"]`));
-            check(!mockCards().some(c => c.id === cardId), 'the backend card is gone');
-            return { cardId };
-        }),
-    },
-    {
-        name: 'flow-expired-session-finishes-the-click',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
-            const cardsBefore = mockCards().length;
-            app.click('#btn-clock');
-            await waitFor('the session bar', () => app.$('#session-bar button'));
-            check(mockCards().length === cardsBefore, 'nothing happens until signed in');
-            check(app.$('#btn-clock').disabled, 'the clicked button waits');
-            app.click('#session-bar button');
-            await waitFor('Clock Out after signing in', () => app.clockLabel() === 'Clock Out');
-            check(!app.$('#session-bar'), 'the bar is gone');
-            check(openMockCard(), 'the clock-in reached the backend');
-            return { cards: mockCards().length };
-        }),
-    },
-    {
-        name: 'flow-expired-session-shows-on-return',
-        mode: 'mock',
-        run: () => withApp(async app => {
-            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
-            app.doc.dispatchEvent(new Event('visibilitychange'));
-            await waitFor('the session bar without any click', () => app.$('#session-bar'));
-            check(app.doc.body.classList.contains('session-expired'), 'the stale data is marked');
-            app.click('#session-bar button');
-            await waitFor('the bar to go', () => !app.$('#session-bar'));
-            check(!app.doc.body.classList.contains('session-expired'), 'the mark goes with the bar');
+            check(card.state === 'clockedOut' && card.breaks.length === 1 && card.breaks[0].end, `ends clocked out with one closed break: ${JSON.stringify(card)}`);
             return {};
         }),
     },
     {
-        name: 'flow-idle-returns-to-current-week',
-        mode: 'mock',
+        name: 'past-week-still-shows-the-open-card',
+        // The app starts on last week (a reload while there), so it never saw this week's card.
+        run: () => withApp(async app => {
+            await waitFor('Clock Out on a past week', () => app.clockLabel() === 'Clock Out');
+            return {};
+        }, { week: lastWeek(), beforeLoad: () => mockGraphFetch(`/teams/${MOCK_TEAM.id}/schedule/timeCards/clockIn`, { method: 'POST', body: '{}' }) }),
+    },
+    {
+        name: 'clock-in-from-a-past-week',
+        run: () => withApp(async app => {
+            const cards = app.$$('.card').length;
+            app.click('#btn-clock');
+            await waitFor('Clock Out', () => app.clockLabel() === 'Clock Out');
+            await app.settled('the reload');
+            check(app.$$('.card').length === cards, 'the past week still shows its own cards');
+            return { cards };
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'edit-refuses-a-break-before-clock-in',
+        run: () => withApp(async app => {
+            const before = JSON.stringify(mockCards());
+            app.click('.card [data-action="edit"]');
+            await waitFor('the edit dialog', () => !app.$('#edit-modal').hidden);
+            app.$('.break-edit-row .break-start').value = `${app.$('#edit-clock-in').value.slice(0, 11)}00:05`;
+            app.click('#btn-edit-save');
+            await waitFor('the error', () => app.$$('.toast.error').some(t => /Break start/.test(t.textContent)));
+            check(JSON.stringify(mockCards()) === before, 'nothing saved');
+            check(!app.$('#edit-modal').hidden, 'the dialog stays open');
+            return {};
+        }),
+    },
+    {
+        name: 'edit-saves-notes-and-keeps-break-ids',
+        run: () => withApp(async app => {
+            const id = app.$('.card').dataset.cardId;
+            app.click('.card [data-action="edit"]');
+            await waitFor('the edit dialog', () => !app.$('#edit-modal').hidden);
+            app.$('#edit-notes').value = 'flow note';
+            app.click('#btn-edit-save');
+            await waitFor('the dialog to close', () => app.$('#edit-modal').hidden);
+            const card = mockCards().find(c => c.id === id);
+            check(card.notes?.content === 'flow note', `notes saved: ${JSON.stringify(card.notes)}`);
+            check(card.breaks.length === 1 && card.breaks[0].breakId.startsWith('seed-'), 'the break kept its id');
+            await waitFor('the note on the card', () => app.$(`.card[data-card-id="${id}"] .card-notes`)?.textContent === 'flow note');
+            return {};
+        }),
+    },
+    {
+        name: 'escape-closes-the-edit-dialog-unsaved',
+        run: () => withApp(async app => {
+            const before = JSON.stringify(mockCards());
+            app.click('.card [data-action="edit"]');
+            await waitFor('the edit dialog', () => !app.$('#edit-modal').hidden);
+            app.$('#edit-notes').value = 'never saved';
+            app.doc.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            check(app.$('#edit-modal').hidden, 'closed');
+            check(JSON.stringify(mockCards()) === before, 'nothing saved');
+            return {};
+        }),
+    },
+    {
+        name: 'delete-card',
+        run: () => withApp(async app => {
+            const id = app.$('.card').dataset.cardId;
+            app.click('.card [data-action="delete"]');
+            await waitFor('the confirm dialog', () => !app.$('#confirm-modal').hidden);
+            app.click('#btn-confirm-ok');
+            await waitFor('the card to go', () => !app.$(`.card[data-card-id="${id}"]`));
+            check(!mockCards().some(c => c.id === id), 'gone from the backend');
+            return {};
+        }),
+    },
+    {
+        name: 'delete-break',
+        run: () => withApp(async app => {
+            const id = app.$('.card').dataset.cardId;
+            app.click(`.card[data-card-id="${id}"] [data-action="delete-break"]`);
+            await waitFor('the confirm dialog', () => !app.$('#confirm-modal').hidden);
+            app.click('#btn-confirm-ok');
+            await waitFor('the break to go', () => !mockCards().find(c => c.id === id).breaks.length);
+            await waitFor('the break row to go', () => !app.$(`.card[data-card-id="${id}"] .break-row`));
+            return {};
+        }),
+    },
+    {
+        name: 'drag-card-end',
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.grab(block, 'end', 12, 31);
+            check(app.$('#drag-tooltip').textContent.includes('12:30'), `the tooltip shows the snapped time: ${app.$('#drag-tooltip').textContent}`);
+            app.pointer('pointerup', block, 0);
+            await waitFor('the new clock-out', () => localTime(card().clockOutEvent.dateTime) === '12:30');
+            check(localTime(card().clockInEvent.dateTime) === '9:00', 'clock-in unchanged');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'drag-break-start',
+        run: () => withApp(async app => {
+            const { id, card } = seededBlock(app);
+            const overlay = app.$(`.break-overlay[data-card-id="${id}"]`);
+            app.grab(overlay, 'start', 10, 19);
+            app.pointer('pointerup', overlay, 0);
+            await waitFor('the new break start', () => localTime(card().breaks[0].start.dateTime) === '10:20');
+            check(localTime(card().breaks[0].end.dateTime) === '10:45', 'break end unchanged');
+            check(card().breaks[0].breakId.startsWith('seed-'), 'the break kept its id');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'drag-escape-cancels',
+        run: () => withApp(async app => {
+            const before = JSON.stringify(mockCards());
+            const { block } = seededBlock(app);
+            const width = block.style.width;
+            app.grab(block, 'end', 14, 0);
+            check(block.style.width !== width, 'the block follows the pointer');
+            app.win.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape' }));
+            await app.settled('the redraw');
+            check(JSON.stringify(mockCards()) === before, 'nothing saved');
+            check(app.$(`.tc-block[data-card-id="${block.dataset.cardId}"]`).style.width === width, 'back where it was');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'drag-survives-a-background-refresh',
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.grab(block, 'end', 13, 0);
+            app.doc.dispatchEvent(new Event('visibilitychange'));
+            await app.settled('the refresh');
+            check(block.isConnected, 'the dragged block is still on the page');
+            app.pointer('pointerup', block, 0);
+            await waitFor('the new clock-out', () => localTime(card().clockOutEvent.dateTime) === '13:00');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'expired-session-finishes-the-click',
+        run: () => withApp(async app => {
+            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
+            const cards = mockCards().length;
+            app.click('#btn-clock');
+            await waitFor('the session bar', () => app.$('#session-bar button'));
+            check(mockCards().length === cards, 'nothing happens until signed in');
+            check(app.$('#btn-clock').disabled, 'the clicked button waits');
+            check(app.doc.body.classList.contains('session-expired'), 'the shown data is marked stale');
+            app.click('#session-bar button');
+            await waitFor('Clock Out after signing in', () => app.clockLabel() === 'Clock Out');
+            check(!app.$('#session-bar') && !app.doc.body.classList.contains('session-expired'), 'the bar and the mark are gone');
+            return {};
+        }),
+    },
+    {
+        name: 'expired-session-shows-on-return',
+        run: () => withApp(async app => {
+            sessionStorage.setItem(auth.MOCK_EXPIRED_KEY, '1');
+            app.doc.dispatchEvent(new Event('visibilitychange'));
+            await waitFor('the session bar without a click', () => app.$('#session-bar'));
+            app.click('#session-bar button');
+            await waitFor('the bar to go', () => !app.$('#session-bar'));
+            return {};
+        }),
+    },
+    {
+        name: 'idle-returns-to-this-week',
         run: () => withApp(async app => {
             const thisWeek = app.weekLabel();
             await app.previousWeek();
             sessionStorage.setItem(STORAGE_KEYS.lastActivity, String(Date.now() - 2 * 3600 * 1000));
             app.doc.dispatchEvent(new Event('visibilitychange'));
             await waitFor('this week again', () => app.weekLabel() === thisWeek);
-            return { week: thisWeek };
+            return {};
         }),
     },
 ];
 
-// ─────────────────────────────────────────────
-// Test definitions. mode: 'live' runs against real Graph only, 'mock' with ?mock only, 'both' always.
-// ─────────────────────────────────────────────
-const tests = [
-    {
-        name: 'auth-status',
-        requiresAuth: false,
-        run: async ctx => ({
-            authenticated: ctx.session.authenticated,
-            account: ctx.session.account ? {
-                name: ctx.session.account.name || '',
-                username: ctx.session.account.username || '',
-            } : null,
-            redirectUri: auth.getRuntimeConfig().redirectUri,
-        }),
-    },
-    ...flowTests,
-    {
-        name: 'confirm-supported-timecard-filters',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            return {
-                teamId: team.id,
-                support: assertDocumentedFilterSupport(await probeDocumentedFilterMatrix(team.id)),
-            };
-        },
-    },
-    {
-        name: 'confirm-no-combined-week-query',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            return {
-                teamId: team.id,
-                supported: assertProbeRejected(
-                    await probeCombinedWeekQuery(team.id, ctx.params.week),
-                    'combined weekly timecard query support',
-                ),
-            };
-        },
-    },
-    {
-        name: 'joined-teams',
-        requiresAuth: true,
-        run: async ctx => {
-            const teams = await fetchJoinedTeams();
-            ctx.teams = teams;
-            return {
-                count: teams.length,
-                firstTeam: teams[0] ? { id: teams[0].id, displayName: teams[0].displayName } : null,
-            };
-        },
-    },
-    {
-        name: 'resolve-team',
-        requiresAuth: true,
-        run: async ctx => {
-            const teams = await fetchJoinedTeams();
-            ctx.teams = teams;
-            const savedId = ctx.params.teamId || localStorage.getItem(SESSION_KEY_SELECTED_TEAM_ID) || '';
-            ctx.team = teams.find(t => t.id === savedId) || teams[0] || null;
-            return {
-                requestedTeamId: ctx.params.teamId || null,
-                resolvedTeam: ctx.team ? { id: ctx.team.id, displayName: ctx.team.displayName } : null,
-                availableTeams: teams.length,
-            };
-        },
-    },
-    {
-        name: 'timecards-top-1',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            const result = await auth.graphFetch(buildTimeCardsPageUrl(team.id, { pageSize: 1 }));
-            return {
-                teamId: team.id,
-                count: Array.isArray(result?.value) ? result.value.length : 0,
-                hasNextLink: Boolean(result?.['@odata.nextLink']),
-            };
-        },
-    },
-    {
-        name: 'selected-week-fetch-timing',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            const startedAt = performance.now();
-            const snapshot = await fetchWeekTimeCards(team.id, ctx.params.week);
-            const durationMs = Math.round(performance.now() - startedAt);
-            return {
-                teamId: team.id,
-                weekStart: formatDateInputValue(snapshot.weekStart),
-                cardsCount: snapshot.cards.length,
-                pageCount: snapshot.pageCount,
-                durationMs,
-                activeCard: summarizeCard(snapshot.activeCard),
-                sample: snapshot.cards.slice(0, 10).map(summarizeCard),
-            };
-        },
-    },
-    {
-        name: 'server-vs-cache',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            const snapshot = await fetchWeekTimeCards(team.id, ctx.params.week);
-            const cache = getTeamCache(team.id);
-            return {
-                teamId: team.id,
-                selectedWeek: formatDateInputValue(snapshot.weekStart),
-                serverCardsCount: snapshot.cards.length,
-                cachedWeekKey: cache.currentWeekKey || null,
-                cachedCardsCount: cache.currentWeekCards.length,
-            };
-        },
-    },
-    {
-        name: 'confirm-no-lastmodified-filter',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            return {
-                teamId: team.id,
-                supported: assertProbeRejected(
-                    await probeLastModifiedFilter(team.id),
-                    'lastModifiedDateTime filter support',
-                ),
-            };
-        },
-    },
-    {
-        name: 'confirm-no-lastmodified-orderby',
-        requiresAuth: true,
-        run: async ctx => {
-            const team = await requireTeam(ctx);
-            return {
-                teamId: team.id,
-                supported: assertProbeRejected(
-                    await probeLastModifiedOrderBy(team.id),
-                    'lastModifiedDateTime orderby support',
-                ),
-            };
-        },
-    },
-];
+// ── The runner ──────────────────────────────────────────────────────────────
 
-function getRequestedTests(params) {
-    const mode = test => test.mode || (test.requiresAuth ? 'live' : 'both');
-    const runnable = tests.filter(test => mode(test) === 'both' || mode(test) === (mockEnabled ? 'mock' : 'live'));
-    if (!params.test || params.test === 'all') return runnable;
-    return runnable.filter(test => test.name === params.test);
+function setAuthStatus(session) {
+    $('test-auth-status').textContent = session.authenticated ? `Signed in: ${session.account?.username}` : 'Not signed in';
+    $('btn-test-signin').hidden = session.authenticated;
+    $('btn-test-signout').hidden = !session.authenticated;
+}
+
+function resultRow(name) {
+    const row = document.createElement('section');
+    row.className = 'test-result test-result-running';
+    row.innerHTML = '<div class="test-result-name"></div><div class="test-result-body">running…</div>';
+    row.firstElementChild.textContent = name;
+    $('test-results').appendChild(row);
+    return (status, details) => {
+        row.className = `test-result test-result-${status}`;
+        row.lastElementChild.textContent = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
+    };
 }
 
 async function runSuite() {
-    const params = parseParams();
-    renderMeta(params);
-    $('test-results').innerHTML = '';
-
-    let session;
-    try {
-        session = await auth.ensureSession({ redirectIfMissing: false });
-    } catch (error) {
-        renderSummary('Auth bootstrap failed before tests could run.');
-        setAuthStatus({ authenticated: false, account: null });
-        const row = createResultRow('auth-bootstrap');
-        updateResultRow(row, 'fail', error.message || String(error));
-        return;
-    }
-
+    const params = Object.fromEntries(new URLSearchParams(location.search));
+    const tests = (mockEnabled ? mockTests : liveTests).filter(test => !params.test || test.name === params.test);
+    $('test-meta').textContent = `${mockEnabled ? 'Mock' : 'Live'} tests. Run one with ?test=<name>: ${tests.map(t => t.name).join(', ')}.`;
+    $('test-results').replaceChildren();
+    const session = await auth.ensureSession();
     setAuthStatus(session);
 
-    const requested = getRequestedTests(params);
-    if (!requested.length) {
-        renderSummary(`Unknown test "${params.test}".`);
-        const row = createResultRow('test-selection');
-        updateResultRow(row, 'fail', `Unknown test name: ${params.test}`);
-        return;
-    }
-
-    const context = { params, session, team: null, teams: null };
+    const context = { params, session, team: null };
     const startedAt = performance.now();
-    let passed = 0;
     const problems = [];
-
-    for (const test of requested) {
-        const row = createResultRow(test.name);
-        if (test.requiresAuth && !session.authenticated) {
+    let passed = 0;
+    for (const test of tests) {
+        const finish = resultRow(test.name);
+        if (!session.authenticated) {
             problems.push(`SKIP ${test.name}: not signed in`);
-            updateResultRow(row, 'skip', 'Skipped because the integrated browser is not signed in yet.');
+            finish('skip', 'Not signed in.');
             continue;
         }
-
         try {
-            const result = await test.run(context);
+            finish('pass', await test.run(context));
             passed += 1;
-            updateResultRow(row, 'pass', result);
         } catch (error) {
-            const message = error?.message || String(error);
-            problems.push(`FAIL ${test.name}: ${message}`);
-            updateResultRow(row, 'fail', message);
-            console.error(`[self-test] FAIL ${test.name}`, error);
+            problems.push(`FAIL ${test.name}: ${error.message}`);
+            finish('fail', error.stack || error.message);
         }
     }
-
     const failed = problems.filter(line => line.startsWith('FAIL')).length;
     const skipped = problems.length - failed;
-    renderSummary(`Requested ${requested.length} test(s). Passed: ${passed}. Failed: ${failed}. Skipped: ${skipped}. Authenticated: ${session.authenticated ? 'yes' : 'no'}.`);
-    const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-    reportToDevServer(mockEnabled ? 'mock-tests' : 'browser-tests', [
-        `${failed ? 'FAIL' : 'ok'} ${mockEnabled ? 'mock' : 'live'} browser tests: ${passed}/${requested.length} passed, ${failed} failed, ${skipped} skipped, signed in: ${session.authenticated ? 'yes' : 'no'}, ${seconds}s`,
-        ...problems,
-    ].join('\n'));
+    const mode = mockEnabled ? 'mock' : 'live';
+    const summary = `${failed ? 'FAIL' : 'ok'} ${mode} browser tests: ${passed}/${tests.length} passed, ${failed} failed, ${skipped} skipped, ${((performance.now() - startedAt) / 1000).toFixed(1)}s`;
+    $('test-summary').textContent = summary;
+    reportToDevServer(mockEnabled ? 'mock-tests' : 'browser-tests', [summary, ...problems].join('\n'));
 }
 
-function bindActions() {
-    const signInButton = $('btn-test-signin');
-    const signOutButton = $('btn-test-signout');
-
-    if (signInButton) {
-        signInButton.addEventListener('click', async () => {
-            signInButton.disabled = true;
-            try { await auth.signIn({ navigateToApp: false }); }
-            finally { signInButton.disabled = false; await runSuite(); }
-        });
-    }
-
-    if (signOutButton) {
-        signOutButton.addEventListener('click', async () => {
-            signOutButton.disabled = true;
-            try { await auth.signOut({ navigateToLogin: false }); }
-            finally { signOutButton.disabled = false; await runSuite(); }
-        });
-    }
-}
-
-bindActions();
+$('btn-test-signin').addEventListener('click', () => void auth.signIn({ navigateToApp: false }).finally(runSuite));
+$('btn-test-signout').addEventListener('click', () => void auth.signOut({ navigateToLogin: false }).finally(runSuite));
 void runSuite();

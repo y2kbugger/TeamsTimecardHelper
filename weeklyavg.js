@@ -58,7 +58,7 @@ export function initWeeklyAverageFeature(appApi) {
 
 export function setWeeklyAverageTriggerVisible(visible) {
     if (!triggerButton) return;
-    triggerButton.style.display = visible ? 'inline-flex' : 'none';
+    triggerButton.hidden = !visible;
     triggerButton.disabled = !visible;
     if (!visible && isOpen) closeModal();
 }
@@ -70,7 +70,7 @@ function buildFeatureUi() {
     triggerButton.textContent = 'Weekly Average';
     triggerButton.setAttribute('aria-haspopup', 'dialog');
     triggerButton.setAttribute('aria-expanded', 'false');
-    triggerButton.style.display = 'none';
+    triggerButton.hidden = true;
     document.querySelector('#header-actions').appendChild(triggerButton);
 
     modalOverlay = document.createElement('div');
@@ -108,24 +108,17 @@ function buildFeatureUi() {
                     </div>
                 </fieldset>
             </div>
-            <div class="weekly-avg-loading hidden-start"><span class="spinner"></span>Loading weekly average...</div>
-            <div class="weekly-avg-empty hidden-start"></div>
-            <div class="weekly-avg-table-wrap hidden-start">
+            <div class="weekly-avg-loading" hidden><span class="spinner"></span>Loading weekly average…</div>
+            <div class="weekly-avg-empty" hidden></div>
+            <div class="weekly-avg-table-wrap" hidden>
                 <table class="weekly-avg-table">
-                    <colgroup>
-                        <col class="weekly-avg-col-label-col" />
-                        <col class="weekly-avg-col-time-main-col" />
-                        <col class="weekly-avg-col-time-main-col" />
-                        <col class="weekly-avg-col-symbol-col" />
-                        <col class="weekly-avg-col-symbol-col" />
-                    </colgroup>
                     <thead>
                         <tr>
-                            <th class="weekly-avg-col-label"></th>
-                            <th class="weekly-avg-col-time weekly-avg-col-time-main">Expected</th>
-                            <th class="weekly-avg-col-time weekly-avg-col-time-main">Actual</th>
-                            <th class="weekly-avg-col-time weekly-avg-col-symbol"><span class="weekly-avg-col-symbol-mark">&plusmn;&Delta;</span></th>
-                            <th class="weekly-avg-col-time weekly-avg-col-symbol"><span class="weekly-avg-col-symbol-mark">&Sigma;</span></th>
+                            <th></th>
+                            <th>Expected</th>
+                            <th>Actual</th>
+                            <th title="Difference this week or day">±Δ</th>
+                            <th title="Running difference">Σ</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -248,10 +241,10 @@ function syncInputsFromSettings() {
 function setModalState({ headline = 'Weekly average', meta = '', empty = '', loading = false, showTable = false } = {}) {
     headlineEl.textContent = headline;
     metaEl.textContent = meta;
-    loadingEl.style.display = loading ? 'block' : 'none';
+    loadingEl.hidden = !loading;
     emptyEl.textContent = empty;
-    emptyEl.style.display = empty ? 'block' : 'none';
-    tableWrapEl.style.display = showTable ? 'block' : 'none';
+    emptyEl.hidden = !empty;
+    tableWrapEl.hidden = !showTable;
     if (!showTable) tableBodyEl.innerHTML = '';
 }
 
