@@ -95,18 +95,15 @@ body.is-dragging { cursor: ew-resize; user-select: none }
   background: repeating-linear-gradient(135deg, #f0a843 0 4px, #d68f2d 4px 8px);
   opacity: .92;
 }
-.tc-block:not(.is-dragging) { cursor: copy }
+/* The break a Ctrl+click would add: a faint hint, armed (filled) while Ctrl is held. */
 .break-ghost {
   position: absolute;
   top: 9px;
   bottom: 9px;
   z-index: 2;
   display: flex;
-  align-items: center;
   justify-content: center;
-  overflow: visible;
-  background: rgba(240, 168, 67, .28);
-  border: 1px dashed var(--warn);
+  border: 1px dashed rgba(240, 168, 67, .55);
   pointer-events: none;
 }
 .break-ghost::after {
@@ -115,12 +112,15 @@ body.is-dragging { cursor: ew-resize; user-select: none }
   bottom: calc(100% + 12px);
   padding: 2px 7px;
   background: var(--surface);
-  border: 1px solid var(--warn);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--warn);
+  color: var(--text2);
   font: 600 .7rem var(--mono);
   white-space: nowrap;
 }
+.break-ghost.is-armed { background: rgba(240, 168, 67, .35); border-color: var(--warn) }
+.break-ghost.is-armed::after { border-color: var(--warn); color: var(--warn) }
+body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
 .is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
 
@@ -132,7 +132,7 @@ body.is-dragging { cursor: ew-resize; user-select: none }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 
-.card-list { display: grid; gap: 6px; max-width: 1000px; margin: 12px auto 0 }
+.card-list { display: grid; gap: 6px; max-width: 760px; margin: 12px auto 0 }
 .card { padding: 7px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s }
 .card.is-highlighted { border-color: var(--success) }
 .card-row { display: flex; align-items: center; gap: 10px; font-size: .82rem }
@@ -145,7 +145,8 @@ body.is-dragging { cursor: ew-resize; user-select: none }
 .breaks { display: grid; gap: 3px; margin: 6px 0 0 14px; padding-left: 12px; border-left: 2px solid rgba(240, 168, 67, .35) }
 .break-row { display: flex; align-items: center; gap: 10px; color: var(--text2); font-size: .76rem }
 .break-label { color: var(--warn) }
-.break-row .btn-quiet { margin-left: auto }
+.break-times { min-width: 20ch }
+.break-length { min-width: 6ch }
 
 /* ── The edit dialog ───────────────────────────────────────────────────── */
 

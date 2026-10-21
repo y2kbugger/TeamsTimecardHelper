@@ -2,7 +2,8 @@
 // daylight saving days), dragging their edges, and adding breaks. A drag previews the snapped,
 // clamped time and saves only on release; Escape cancels. While a drag runs the app holds back
 // re-renders, so a background refresh cannot pull the block from under the pointer. Hovering a
-// card shows a ghost of the break a click would add there.
+// card shows a faint ghost of the break a Ctrl+click would add there; holding Ctrl arms it. A plain
+// click only selects, so a click meant to select never adds a break to a real timecard.
 import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, proposeBreak } from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
@@ -141,17 +142,31 @@ export function attachTimeline(root, handlers) {
     root.addEventListener('pointerleave', hideGhost);
     root.addEventListener('click', event => {
         const block = event.target.closest('.tc-block');
-        if (!block || !ghost || ghost.cardId !== block.dataset.cardId) return;
+        if (!event.ctrlKey || !block || !ghost || ghost.cardId !== block.dataset.cardId) return;
         const card = handlers.cardById(ghost.cardId);
         const { proposal } = ghost;
         hideGhost();
         if (card) handlers.onAddBreak(card, proposal);
     });
     window.addEventListener('keydown', event => {
+        if (event.key === 'Control') armGhost(true);
         if (event.key !== 'Escape') return;
         if (drag) endDrag(false);
         hideGhost();
     });
+    window.addEventListener('keyup', event => {
+        if (event.key === 'Control') armGhost(false);
+    });
+    window.addEventListener('blur', () => armGhost(false));
+}
+
+// Ctrl held: the ghost is what a click adds now, and says so.
+function armGhost(armed) {
+    document.body.classList.toggle('ctrl-held', armed);
+    if (!ghost) return;
+    const range = `${timeFormat.format(ghost.proposal.startMs)} → ${timeFormat.format(ghost.proposal.endMs)}`;
+    ghost.element.classList.toggle('is-armed', armed);
+    ghost.element.title = armed ? `+ break ${range}` : `Ctrl+click: break ${range}`;
 }
 
 // The break a click would add, under the pointer on a card's block (not on a handle or a break).
@@ -168,10 +183,10 @@ function updateGhost(event, handlers) {
     if (!ghost) ghost = { element: document.createElement('div') };
     const { element } = ghost;
     element.className = 'break-ghost';
-    element.title = `+ break ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`;
     place(element, day, proposal.startMs, proposal.endMs);
     if (element.parentElement !== axis) axis.appendChild(element);
     Object.assign(ghost, { cardId: card.id, proposal });
+    armGhost(event.ctrlKey);
 }
 
 function hideGhost() {

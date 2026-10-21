@@ -384,17 +384,33 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
-        name: 'add-break-at-the-ghost',
+        name: 'ctrl-click-adds-the-ghost-break',
         run: () => withApp(async app => {
             const { block, card } = seededBlock(app);
             app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 22));
             const ghost = app.$('.break-ghost');
             check(ghost?.title.includes('11:15') && ghost.title.includes('11:25'), `the ghost offers 11:15-11:25: ${ghost?.title}`);
-            block.click();
+            check(/Ctrl\+click/.test(ghost.title) && !ghost.classList.contains('is-armed'), `a hint until Ctrl is held: ${ghost.title}`);
+            app.win.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }));
+            check(ghost.classList.contains('is-armed') && ghost.title.startsWith('+ break'), `armed with Ctrl: ${ghost.title}`);
+            block.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, ctrlKey: true }));
             await waitFor('the new break', () => card().breaks.length === 2);
             const added = card().breaks.find(b => localTime(b.start.dateTime) !== '10:30');
             check(`${localTime(added.start.dateTime)}-${localTime(added.end.dateTime)}` === '11:15-11:25', `added 11:15-11:25: ${JSON.stringify(added)}`);
             await waitFor('the break on the timeline', () => app.$$(`.break-overlay[data-card-id="${block.dataset.cardId}"]`).length === 2);
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'a-plain-click-adds-no-break',
+        run: () => withApp(async app => {
+            const { block, card } = seededBlock(app);
+            app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 22));
+            check(app.$('.break-ghost'), 'the hint shows');
+            block.click();
+            await app.settled('anything the click set off');
+            check(card().breaks.length === 1, 'still one break');
+            check(block.classList.contains('is-highlighted') || app.$(`.tc-block.is-highlighted[data-card-id="${block.dataset.cardId}"]`), 'the click selected the card');
             return {};
         }, { week: lastWeek() }),
     },
@@ -417,7 +433,7 @@ const mockTests = [
             app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 30));
             check(!app.$('.break-ghost'), 'no ghost during a drag');
             app.pointer('pointerup', block, 0);
-            block.click();
+            block.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, ctrlKey: true }));
             await waitFor('the drag saved', () => localTime(card().clockOutEvent.dateTime) === '11:30');
             await app.settled('the reload');
             check(card().breaks.length === 1, 'still one break');

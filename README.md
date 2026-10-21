@@ -54,8 +54,8 @@ uses Shifts.
   current week, so Monday morning opens on the new week.
 - The toolbar's clock state comes from the current week whatever week is shown.
 - Breaks are added on the timeline: hovering a card shows a ghost of a ten-minute break fitted
-  into the free time under the pointer, and a click adds it. The edit dialog changes and removes
-  breaks.
+  into the free time under the pointer, and Ctrl+click adds it (a plain click only selects). The
+  edit dialog changes and removes breaks.
 - Weekly average: expected time is split evenly over the chosen workdays and counts only through
   today.
 

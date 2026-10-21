@@ -434,7 +434,7 @@ function renderBreaks(card, breakAction) {
         row.dataset.breakIndex = String(index);
         row.innerHTML = `
             <span class="break-label">Break</span>
-            <span>${timeFormat.format(startMs)} → ${b.end ? timeFormat.format(new Date(b.end.dateTime)) : 'now'}</span>
+            <span class="break-times">${timeFormat.format(startMs)} → ${b.end ? timeFormat.format(new Date(b.end.dateTime)) : 'now'}</span>
             <span class="break-length">${b.end ? `${Math.round((new Date(b.end.dateTime) - startMs) / 60000)} min` : ''}</span>
             ${!b.end && breakAction === 'endBreak' ? '<button class="btn btn-success btn-compact" data-action="endBreak">End Break</button>' : ''}
             <button class="btn btn-quiet btn-compact btn-icon" data-action="delete-break" title="Delete break" aria-label="Delete break">🗑</button>`;
