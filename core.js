@@ -265,13 +265,17 @@ function readDatetimeInput(value, originalIso) {
 }
 
 // form: { clockIn, clockOut, notes, breaks: [{ breakId, start, end }] } as the inputs hold them.
-// Returns { changes } for buildUpdatedCard, or { error } saying what to fix.
-export function readEditForm(card, form) {
+// Returns { changes } for buildUpdatedCard, or { error } saying what to fix. Nothing may be in the
+// future, and a clocked-out card stays clocked out: clearing its clock-out would set it running
+// again from its old clock-in, beside whatever card is open now.
+export function readEditForm(card, form, nowMs = Date.now()) {
     const clockIn = readDatetimeInput(form.clockIn, card.clockIn?.dateTime);
     const clockOut = readDatetimeInput(form.clockOut, card.clockOut?.dateTime);
     if (!clockIn) return { error: 'Clock-in time is required.' };
     if (clockOut === undefined) return { error: 'Clock-out is not a valid time.' };
+    if (!clockOut && card.clockOut) return { error: 'A clocked-out card needs its clock-out.' };
     if (clockOut && clockOut <= clockIn) return { error: 'Clock-out must be after clock-in.' };
+    if ((clockOut || clockIn).getTime() > nowMs) return { error: 'Times cannot be in the future.' };
 
     const breaks = [];
     for (const row of form.breaks) {
@@ -285,6 +289,7 @@ export function readEditForm(card, form) {
         if (end && end <= start) return { error: 'Break end must be after break start.' };
         if (end && clockOut && end > clockOut) return { error: 'Break end must be within the card.' };
         if (!end && clockOut) return { error: 'Only a running card can have a break without an end.' };
+        if ((end || start).getTime() > nowMs) return { error: 'Times cannot be in the future.' };
         breaks.push({ breakId: row.breakId || undefined, start: { dateTime: start.toISOString() }, end: end ? { dateTime: end.toISOString() } : null });
     }
     const sorted = [...breaks].sort((a, b) => ms(a.start) - ms(b.start));
@@ -339,16 +344,7 @@ export function buildTimeCardUpdateBody(card) {
     return body;
 }
 
-// A timeline drag of a card's edges. An open card keeps running: its end is never set.
-export function buildProjectedTimelineUpdate(card, newStart, newEnd) {
-    const effectiveEnd = card?.clockOut ? newEnd : null;
-    const updatedCard = buildUpdatedCard(card, { clockIn: newStart, clockOut: effectiveEnd });
-    return { effectiveEnd, updatedCard, requestBody: buildTimeCardUpdateBody(updatedCard) };
-}
-
 // ── Weekly average ──────────────────────────────────────────────────────────
-
-export const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
 // [startMs, endMs) spans of work in a card: clock-in to clock-out minus breaks.
 export function getWorkSegments(card, nowMs) {

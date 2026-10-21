@@ -5,7 +5,7 @@ import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
-    buildProjectedTimelineUpdate, getWorkSegments, buildDailyActuals, buildWeeklyModel,
+    getWorkSegments, buildDailyActuals, buildWeeklyModel,
     dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
 } from '../core.js';
 
@@ -177,10 +177,12 @@ test('new break: on a running card, not past now', () => {
     assert.ok(p.endMs <= now, 'ends by now');
 });
 
+const EDIT_NOW = local('2026-10-21T18:00').getTime();
+
 test('edit form: unchanged fields keep their seconds', () => {
     const c = normalizeCard({ id: 'c', clockInEvent: { dateTime: '2026-10-21T13:00:42.000Z' }, clockOutEvent: { dateTime: '2026-10-21T15:00:17.000Z' }, breaks: [] });
     const form = { clockIn: toLocalDatetimeInput(new Date(c.clockIn.dateTime)), clockOut: toLocalDatetimeInput(new Date(c.clockOut.dateTime)), notes: ' hi ', breaks: [] };
-    const { changes } = readEditForm(c, form);
+    const { changes } = readEditForm(c, form, EDIT_NOW);
     assert.equal(changes.clockIn.toISOString(), '2026-10-21T13:00:42.000Z');
     assert.equal(changes.clockOut.toISOString(), '2026-10-21T15:00:17.000Z');
     assert.equal(changes.notes, 'hi');
@@ -189,9 +191,12 @@ test('edit form: unchanged fields keep their seconds', () => {
 test('edit form: refuses what would make a bad card', () => {
     const c = card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', breaks: [['2026-10-21T10:00', '2026-10-21T10:15']] });
     const form = (over = {}) => ({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00', notes: '', breaks: [{ breakId: 'b0', start: '2026-10-21T10:00', end: '2026-10-21T10:15' }], ...over });
-    const error = over => readEditForm(c, form(over)).error;
+    const error = over => readEditForm(c, form(over), EDIT_NOW).error;
     assert.equal(error({}), undefined);
     assert.match(error({ clockIn: '' }), /Clock-in time is required/);
+    assert.match(error({ clockOut: '' }), /needs its clock-out/);
+    assert.match(error({ clockOut: '2026-10-21T18:05' }), /in the future/);
+    assert.match(error({ breaks: [{ start: '2026-10-21T10:00', end: '' }], clockOut: '' }), /needs its clock-out/);
     assert.match(error({ clockOut: '2026-10-21T08:00' }), /Clock-out must be after/);
     assert.match(error({ breaks: [{ start: '2026-10-21T08:30', end: '2026-10-21T09:30' }] }), /Break start must be within/);
     assert.match(error({ breaks: [{ start: '2026-10-21T11:00', end: '2026-10-21T12:30' }] }), /Break end must be within/);
@@ -203,7 +208,8 @@ test('edit form: refuses what would make a bad card', () => {
 
 test('edit form: a running card may keep an ongoing break; empty rows are dropped', () => {
     const c = card({ clockIn: '2026-10-21T09:00', breaks: [['2026-10-21T10:00', null]] });
-    const { changes } = readEditForm(c, { clockIn: '2026-10-21T09:00', clockOut: '', notes: '', breaks: [{ breakId: 'b0', start: '2026-10-21T10:00', end: '' }, { start: '', end: '' }] });
+    const { changes } = readEditForm(c, { clockIn: '2026-10-21T09:00', clockOut: '', notes: '', breaks: [{ breakId: 'b0', start: '2026-10-21T10:00', end: '' }, { start: '', end: '' }] }, EDIT_NOW);
+    assert.match(readEditForm(c, { clockIn: '2026-10-21T09:00', clockOut: '', notes: '', breaks: [{ start: '2026-10-21T18:30', end: '' }] }, EDIT_NOW).error, /in the future/);
     assert.equal(changes.clockOut, null);
     assert.equal(changes.breaks.length, 1);
     assert.equal(changes.breaks[0].breakId, 'b0');
@@ -221,10 +227,11 @@ test('update body omits clock-out on an open card and keeps break ids', () => {
 
 test('dragging an open card never clocks it out', () => {
     const open = card({ clockIn: '2026-01-01T09:00' });
-    const projection = buildProjectedTimelineUpdate(open, local('2026-01-01T08:30'), local('2026-01-01T11:00'));
-    assert.equal(projection.effectiveEnd, null);
-    assert.equal(projection.updatedCard.state, 'clockedIn');
-    assert.equal('clockOutEvent' in projection.requestBody, false);
+    const now = local('2026-01-01T11:00').getTime();
+    assert.equal(dragBounds(open, null, 'end', now), null);
+    const { card: moved } = applyDrag(open, null, 'start', local('2026-01-01T08:30').getTime(), now);
+    assert.equal(moved.state, 'clockedIn');
+    assert.equal('clockOutEvent' in buildTimeCardUpdateBody(moved), false);
 });
 
 test('work segments skip breaks and clip them to the card', () => {
