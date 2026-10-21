@@ -425,6 +425,40 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
+        name: 'past-midnight-is-a-ghost-handled-at-home',
+        // Last week's Tuesday 22:00 to Wednesday 00:30, a break 23:00-23:15.
+        run: () => withApp(async app => {
+            const id = 'seed-1';
+            const blocks = app.$$(`.tc-block[data-card-id="${id}"]`);
+            check(blocks.length === 2, `drawn on both days: ${blocks.length}`);
+            const home = blocks.find(b => !b.classList.contains('is-overflow'));
+            const ghost = blocks.find(b => b !== home);
+            check(ghost.classList.contains('is-overflow') && !ghost.querySelector('.resize-handle'), 'Wednesday has an untouchable ghost');
+            check(getComputedStyle(ghost).pointerEvents === 'none', 'the ghost takes no pointer');
+            const end = home.querySelector('.resize-handle[data-edge="end"]');
+            const axisRight = home.parentElement.getBoundingClientRect().right;
+            check(end && Math.abs(end.getBoundingClientRect().right - axisRight) < 3, 'Tuesday has its end handle at the end of the axis');
+            app.pointer('pointermove', home, app.xAt(home.parentElement, 23, 50));
+            check(app.$('.break-ghost'), 'a break offered near midnight');
+            check(app.doc.documentElement.scrollWidth <= app.doc.documentElement.clientWidth, 'its label stays on the page');
+            app.grab(home, 'end', 23, 30);
+            app.pointer('pointerup', home, 0);
+            const card = () => mockCards().find(c => c.id === id);
+            await waitFor('the new clock-out', () => localTime(card().clockOutEvent.dateTime) === '23:30');
+            return {};
+        }, {
+            week: lastWeek(),
+            beforeLoad: () => {
+                const tuesday = addDays(getWeekRange(lastWeek()).weekStart, 2);
+                const at = (days, h, m) => { const d = addDays(tuesday, days); d.setHours(h, m, 0, 0); return { dateTime: d.toISOString() }; };
+                return mockGraphFetch(`/teams/${MOCK_TEAM.id}/schedule/timeCards/seed-1`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ clockInEvent: at(0, 22, 0), clockOutEvent: at(1, 0, 30), breaks: [{ breakId: 'seed-1-b', start: at(0, 23, 0), end: at(0, 23, 15) }] }),
+                });
+            },
+        }),
+    },
+    {
         name: 'the-click-ending-a-drag-adds-no-break',
         run: () => withApp(async app => {
             const { block, card } = seededBlock(app);

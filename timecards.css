@@ -102,10 +102,10 @@ body.is-dragging { cursor: ew-resize; user-select: none }
   bottom: 9px;
   z-index: 2;
   display: flex;
-  justify-content: center;
   border: 1px dashed rgba(240, 168, 67, .55);
   pointer-events: none;
 }
+.break-ghost[data-align="end"] { justify-content: flex-end }
 .break-ghost::after {
   content: attr(title);
   position: absolute;
@@ -123,6 +123,8 @@ body.is-dragging { cursor: ew-resize; user-select: none }
 body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
 .is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
+/* The part of a card past midnight, on the next day: worked on in the day it clocked in. */
+.is-overflow { opacity: .3; box-shadow: none; animation: none; pointer-events: none }
 
 /* A thin line standing out above and below its bar: precise to look at, wide to grab. */
 .resize-handle { position: absolute; top: -5px; bottom: -5px; z-index: 1; width: 2px; background: rgba(255, 255, 255, .9); cursor: ew-resize }
@@ -132,7 +134,7 @@ body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 
-.card-list { display: grid; gap: 6px; max-width: 760px; margin: 12px auto 0 }
+.card-list { display: grid; gap: 6px; max-width: 600px; margin: 12px auto 0 }
 .card { padding: 7px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s }
 .card.is-highlighted { border-color: var(--success) }
 .card-row { display: flex; align-items: center; gap: 10px; font-size: .82rem }

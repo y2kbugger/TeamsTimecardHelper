@@ -53,6 +53,8 @@ uses Shifts.
   without a click or key (a new sign-in, a tab left open over the weekend) the app returns to the
   current week, so Monday morning opens on the new week.
 - The toolbar's clock state comes from the current week whatever week is shown.
+- A card past midnight is worked on in the day it clocked in: there an edge past midnight has its
+  handle at the end of the axis; on the next day it is a faint ghost that takes no clicks.
 - Breaks are added on the timeline: hovering a card shows a ghost of a ten-minute break fitted
   into the free time under the pointer, and Ctrl+click adds it (a plain click only selects). The
   edit dialog changes and removes breaks.

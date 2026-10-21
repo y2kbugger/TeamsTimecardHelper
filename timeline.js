@@ -33,18 +33,21 @@ function place(element, day, startMs, endMs) {
     element.style.width = `${Math.max(BLOCK_WIDTH_MIN_PERCENT, right - left)}%`;
 }
 
-function makeSpan(className, day, { cardId, breakIndex, startMs, endMs, card, nowMs, title }) {
+// A card is worked on in the day it clocked in. On a day it only runs into past midnight it is an
+// untouchable ghost; at home, an edge past midnight gets its handle at the end of the axis.
+function makeSpan(className, day, { cardId, breakIndex, startMs, endMs, card, nowMs, title, overflow }) {
     const element = document.createElement('div');
     element.className = className;
     element.dataset.cardId = cardId;
     if (breakIndex !== null) element.dataset.breakIndex = String(breakIndex);
     element.title = title;
     place(element, day, startMs, endMs);
-    // A handle only on an edge inside this day that can move.
+    if (overflow) {
+        element.classList.add('is-overflow');
+        return element;
+    }
     for (const edge of ['start', 'end']) {
-        const edgeMs = edge === 'start' ? startMs : endMs;
-        const inDay = edgeMs >= day.dayStartMs && edgeMs <= day.dayEndMs;
-        if (!inDay || !dragBounds(card, breakIndex, edge, nowMs)) continue;
+        if (!dragBounds(card, breakIndex, edge, nowMs)) continue;
         const handle = document.createElement('div');
         handle.className = 'resize-handle';
         handle.dataset.edge = edge;
@@ -81,8 +84,9 @@ export function renderTimeline(day, nowMs) {
 function appendCard(axis, day, card, nowMs) {
     const startMs = cardStartMs(card);
     const endMs = cardEndMs(card, nowMs);
+    const overflow = startMs < day.dayStartMs;
     const block = makeSpan('tc-block', day, {
-        cardId: card.id, breakIndex: null, startMs, endMs, card, nowMs,
+        cardId: card.id, breakIndex: null, startMs, endMs, card, nowMs, overflow,
         title: `${timeFormat.format(startMs)} → ${card.clockOut ? timeFormat.format(endMs) : 'now'}`,
     });
     if (!card.clockOut) block.classList.add('is-running');
@@ -99,7 +103,7 @@ function appendCard(axis, day, card, nowMs) {
         const breakEndMs = b.end ? new Date(b.end.dateTime).getTime() : nowMs;
         if (breakEndMs <= day.dayStartMs || breakStartMs >= day.dayEndMs) return;
         const overlay = makeSpan('break-overlay', day, {
-            cardId: card.id, breakIndex, startMs: breakStartMs, endMs: breakEndMs, card, nowMs,
+            cardId: card.id, breakIndex, startMs: breakStartMs, endMs: breakEndMs, card, nowMs, overflow,
             title: `Break ${timeFormat.format(breakStartMs)} → ${b.end ? timeFormat.format(breakEndMs) : 'now'}`,
         });
         if (!b.end) overlay.classList.add('is-running');
@@ -184,6 +188,9 @@ function updateGhost(event, handlers) {
     const { element } = ghost;
     element.className = 'break-ghost';
     place(element, day, proposal.startMs, proposal.endMs);
+    // Its label reaches toward the middle of the axis, so it never leaves the page.
+    const middleMs = (proposal.startMs + proposal.endMs) / 2;
+    element.dataset.align = middleMs < (day.dayStartMs + day.dayEndMs) / 2 ? 'start' : 'end';
     if (element.parentElement !== axis) axis.appendChild(element);
     Object.assign(ghost, { cardId: card.id, proposal });
     armGhost(event.ctrlKey);
