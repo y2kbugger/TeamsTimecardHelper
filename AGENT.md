@@ -67,7 +67,6 @@ Three lanes, fastest first. Each prints or writes one condensed line per suite p
 
 ## TODO
 - Drag tests: drive the timeline's resize handles in the mock flows (synthetic pointer events through interact.js), so drag jank can be fixed against a test.
-- Recover from an expired refresh token. On an unmanaged PC the refresh token lease is short (8 of 24 hours); a page left open over sleep fails every interaction until the user reloads and signs in again.
 - Full overhaul: less app code (JS and CSS), more tests, more DRY, more performant, less janky (drag glitches), and a little better looking.
 - add mobile css
 
