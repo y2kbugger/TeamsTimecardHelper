@@ -57,8 +57,6 @@
 - Cache `/me/joinedTeams` in `sessionStorage` for the app boot path so browser refreshes in the same tab do not block on the slow team lookup before the selected-week timecard query.
 
 ## TODO
-- make clockin/out and break start/end a better state machine, combinine the curring chip indicator into the buttons themselves with better colors. don't allow clocking out if on break, etc. use the button to convery the current state instead of a separate chip. use this to simpolify dom and css needs and make state clearer to user.
-- Expunge being able to drag entire cards left and right. i never want to move start and end times together and i just end up doing it by accident. we only need to be able to move a left or right edge of cards and breaks.
 - We want to reduce conceptual overhead of fluff code, so therefore:
     - Reduce css to 30% (character count)
     - Reduce js to 60% (character count)
