@@ -242,8 +242,11 @@ body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .weekly-avg-table { width: 100%; border-collapse: collapse; font-size: .8rem }
 .weekly-avg-table th, .weekly-avg-table td { padding: 8px 14px; border-top: 1px solid var(--border); text-align: right; vertical-align: top }
 .weekly-avg-table th { color: var(--text2); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase }
-.weekly-avg-table :is(th, td):first-child { width: 130px; text-align: left }
-.weekly-avg-week-label { font-weight: 600 }
+.weekly-avg-table :is(th, td):first-child { width: 1%; text-align: left; white-space: nowrap }
+.weekly-avg-week-label { font-weight: 600; white-space: nowrap }
+/* A week's label is a link to that week in the app. */
+.weekly-avg-week-link { padding: 0; background: none; border: 0; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer }
+.weekly-avg-week-link:hover { color: #b3b9ff; text-decoration: underline }
 .weekly-avg-day-label { padding-left: 14px; font-weight: 400 }
 .weekly-avg-day-label::before { content: "↳ "; color: var(--text2) }
 .weekly-avg-mono { font-family: var(--mono); white-space: nowrap }

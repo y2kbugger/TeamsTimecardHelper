@@ -541,6 +541,21 @@ const mockTests = [
         }, { width: 390 }),
     },
     {
+        name: 'weekly-average-weeks-stay-on-one-line-and-open-their-week',
+        run: () => withApp(async app => {
+            app.click('.weekly-avg-trigger');
+            const links = await waitFor('the weekly rows', () => app.$$('.weekly-avg-week-link').length > 2 && app.$$('.weekly-avg-week-link'));
+            const wrapped = links.filter(link => link.getBoundingClientRect().height > parseFloat(app.win.getComputedStyle(link).fontSize) * 1.8);
+            check(!wrapped.length, `no week label wraps at 390px: ${wrapped.map(l => l.textContent).join(', ')}`);
+            const target = links[2];
+            app.click(target);
+            check(app.$('#weekly-avg-modal').hidden, 'the report closes');
+            await app.settled('the chosen week');
+            check(app.$('#week-picker').value === target.dataset.week, `that week is shown: ${app.$('#week-picker').value} vs ${target.dataset.week}`);
+            return {};
+        }, { width: 390 }),
+    },
+    {
         name: 'an-empty-past-day-has-a-timeline',
         run: () => withApp(async app => {
             const days = app.$$('.day');

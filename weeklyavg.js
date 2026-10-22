@@ -20,6 +20,7 @@ const WORKDAY_OPTIONS = [
 
 let fetchTimeCardsForDateRange = null;
 let getCurrentAppState = null;
+let showWeek = null;
 
 let triggerButton = null;
 let modalOverlay = null;
@@ -46,8 +47,8 @@ const longDateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'n
 const hoursFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
 export function initWeeklyAverageFeature(appApi) {
-    ({ fetchTimeCardsForDateRange, getCurrentAppState } = appApi);
-    if (!fetchTimeCardsForDateRange || !getCurrentAppState) throw new Error('Weekly average app API not initialized.');
+    ({ fetchTimeCardsForDateRange, getCurrentAppState, showWeek } = appApi);
+    if (!fetchTimeCardsForDateRange || !getCurrentAppState || !showWeek) throw new Error('Weekly average app API not initialized.');
     if (!triggerButton) {
         buildFeatureUi();
         bindEvents();
@@ -150,6 +151,13 @@ function bindEvents() {
         if (event.target === modalOverlay) closeModal();
     });
     modalOverlay.querySelector('#btn-weekly-avg-close').addEventListener('click', closeModal);
+    // A week's label shows that week in the app.
+    tableBodyEl.addEventListener('click', event => {
+        const week = parseLocalDate(event.target.closest('[data-week]')?.dataset.week);
+        if (!week) return;
+        closeModal();
+        showWeek(week);
+    });
     startInput.addEventListener('change', onSettingsChange);
     hoursInput.addEventListener('change', onSettingsChange);
     workdaysFieldset.addEventListener('change', onSettingsChange);
@@ -332,7 +340,8 @@ function buildWeekRow(row) {
     tr.className = row.isCurrentWeek ? 'weekly-avg-row-current' : '';
     tr.innerHTML = `
         <td class="weekly-avg-cell-label">
-            <div class="weekly-avg-week-label">${shortDateFmt.format(row.weekStart)} - ${shortDateFmt.format(row.weekEnd)}</div>
+            <button type="button" class="weekly-avg-week-label weekly-avg-week-link" data-week="${formatDateInputValue(row.weekStart)}"
+                title="Show this week">${shortDateFmt.format(row.weekStart)} – ${shortDateFmt.format(row.weekEnd)}</button>
             ${weekState ? `<div class="weekly-avg-week-state">${weekState}</div>` : ''}
         </td>
         <td class="weekly-avg-mono">${formatDurationHms(row.expectedMs)}</td>

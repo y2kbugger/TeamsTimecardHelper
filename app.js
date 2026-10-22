@@ -76,7 +76,7 @@ async function boot() {
     show(el.app, true);
     bindEvents();
     weeklyAverage = await import('./weeklyavg.js');
-    weeklyAverage.initWeeklyAverageFeature({ fetchTimeCardsForDateRange, getCurrentAppState });
+    weeklyAverage.initWeeklyAverageFeature({ fetchTimeCardsForDateRange, getCurrentAppState, showWeek: selectWeek });
     await loadTeams();
     setInterval(onBackgroundTick, BACKGROUND_REFRESH_MS);
     setInterval(onLiveTick, LIVE_TICK_MS);
