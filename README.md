@@ -85,6 +85,7 @@ uses Shifts.
 | `login.html`, `auth-done.html` | the sign-in page; the empty page popups and silent renewal return to |
 | `ui.js` | DOM helpers, and on localhost the error and report channel to the dev server |
 | `common.css`, `timecards.css` | shared styles; the app's |
+| `favicon.svg` | the icon: the timeline in small (a card with a break, its handles, the now line) |
 | `test.html`, `test.js` | browser tests: Graph probes (live) and app flows (with `?mock`) |
 | `mockgraph.js` | an in-memory Graph for local work, on with `?mock` and off with `?mock=0` |
 | `devserver.py`, `serve.sh`, `agent-test.sh` | the dev server and the text-only test run |
