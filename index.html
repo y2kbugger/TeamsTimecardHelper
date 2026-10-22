@@ -13,29 +13,13 @@
 </head>
 
 <body data-page="app">
-  <!-- One toolbar: the team on the left; in the middle a status card with the week, its total
-       and the weekly average; clocking in and the account on the right. On a narrow screen the
-       status card takes a row of its own. -->
+  <!-- A slim toolbar: the team on the left, clocking in and the account on the right. The week
+       is in a status card at the top of the page, below it. -->
   <header id="toolbar">
     <div id="toolbar-start">
       <button class="btn btn-quiet team-button" id="btn-team" title="Change team" disabled>
         <span id="toolbar-title">Loading…</span>
       </button>
-    </div>
-    <div id="status-card" hidden>
-      <span class="spinner" id="busy" title="Talking to Microsoft" hidden></span>
-      <div id="week-nav">
-        <button class="btn btn-secondary btn-icon" id="btn-week-prev" title="Previous week" aria-label="Previous week">←</button>
-        <div class="week-picker-stack">
-          <input type="date" id="week-picker" aria-label="Week" />
-          <span id="week-range-label"></span>
-        </div>
-        <button class="btn btn-secondary btn-icon" id="btn-week-next" title="Next week" aria-label="Next week">→</button>
-      </div>
-      <div class="status-total">
-        <span id="week-total" title="Worked this week"></span>
-        <div id="status-links"></div>
-      </div>
     </div>
     <div id="toolbar-end">
       <button class="btn btn-success" id="btn-clock" hidden>Clock In</button>
@@ -53,6 +37,22 @@
   <div id="drag-tooltip" hidden></div>
 
   <main id="app" hidden>
+    <!-- The week, its total and the weekly average, centred above the days. -->
+    <div id="status-card" hidden>
+      <span class="spinner" id="busy" title="Talking to Microsoft" hidden></span>
+      <div id="week-nav">
+        <button class="btn btn-secondary btn-icon" id="btn-week-prev" title="Previous week" aria-label="Previous week">←</button>
+        <div class="week-picker-stack">
+          <input type="date" id="week-picker" aria-label="Week" />
+          <span id="week-range-label"></span>
+        </div>
+        <button class="btn btn-secondary btn-icon" id="btn-week-next" title="Next week" aria-label="Next week">→</button>
+      </div>
+      <div class="status-total">
+        <span id="week-total" title="Worked this week"></span>
+        <div id="status-links"></div>
+      </div>
+    </div>
     <div id="status-panel" class="panel-empty" hidden></div>
     <div id="timecards-loading" class="panel-empty" hidden><span class="spinner"></span>Loading timecards…</div>
     <div id="weeks" hidden></div>

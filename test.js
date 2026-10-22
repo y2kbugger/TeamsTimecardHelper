@@ -521,9 +521,11 @@ const mockTests = [
             check(card.contains(app.$('#week-picker')) && card.contains(app.$('#week-total')), 'the week and its total in it');
             const average = card.querySelector('.weekly-avg-trigger');
             check(average && !average.hidden, 'the weekly average linked from it');
-            const toolbar = app.$('#toolbar').getBoundingClientRect();
+            check(!app.$('#toolbar').contains(card), 'outside the toolbar');
+            const page = app.$('#weeks').getBoundingClientRect();
             const middle = card.getBoundingClientRect().left + card.getBoundingClientRect().width / 2;
-            check(Math.abs(middle - (toolbar.left + toolbar.width / 2)) < 2, 'centred in the toolbar');
+            check(Math.abs(middle - (page.left + page.width / 2)) < 2, 'centred on the page');
+            check(card.getBoundingClientRect().bottom <= app.$('.day').getBoundingClientRect().top, 'above the days');
             return {};
         }),
     },
@@ -533,8 +535,9 @@ const mockTests = [
             const root = app.doc.documentElement;
             check(root.scrollWidth <= root.clientWidth, `the page fits 390px: ${root.scrollWidth} wide`);
             const toolbar = app.$('#toolbar').getBoundingClientRect();
-            check(app.$('#status-card').getBoundingClientRect().top > app.$('#btn-team').getBoundingClientRect().bottom - 1, 'the status card on a row of its own');
-            check(toolbar.height < 130, `the toolbar stays two rows: ${toolbar.height}px`);
+            check(toolbar.height < 60, `the toolbar stays one row: ${toolbar.height}px`);
+            const card = app.$('#status-card').getBoundingClientRect();
+            check(card.left >= 0 && card.right <= root.clientWidth, 'the status card fits');
             const timeline = app.$('.timeline').getBoundingClientRect();
             check(timeline.right <= root.clientWidth, 'a timeline fits the screen');
             return {};

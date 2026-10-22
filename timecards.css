@@ -1,33 +1,33 @@
 /* ── Layout and toolbar ─────────────────────────────────────────────────── */
 
 #app { flex: 1; display: flex; flex-direction: column }
-/* The one toolbar: three columns, the middle one (the status card) centred on the page. */
+/* The slim toolbar: the team, and at the other end clocking in and the account. */
 #toolbar {
   position: sticky;
   top: 0;
   z-index: 50;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  grid-template-areas: "start status end";
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  min-height: 52px;
+  min-height: 48px;
   padding: 6px 20px;
   background: rgba(24, 27, 37, .94);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(6px);
 }
-#toolbar-start { grid-area: start; min-width: 0 }
-#toolbar-end { grid-area: end; justify-self: end }
+#toolbar-start { min-width: 0 }
 #week-nav, #toolbar-end, .status-total { display: flex; align-items: center; gap: 8px }
-/* The week, its total and the weekly average, in one card. */
+/* The week, its total and the weekly average, in one card centred at the top of the page. */
 #status-card {
-  grid-area: status;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 14px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 14px auto 2px;
   padding: 5px 12px;
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -258,12 +258,12 @@ body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .weekly-avg-row-detail-off td { color: rgba(232, 234, 246, .55) }
 
 /* ── A narrow screen (a phone) ─────────────────────────────────────────── */
-/* The toolbar takes two rows, the status card the second; timelines fit the screen instead of
-   scrolling, labelled every sixth hour; cards use the width and wrap. */
+/* Timelines fit the screen instead of scrolling, labelled every sixth hour; cards use the width
+   and wrap. */
 
 @media (max-width: 760px) {
-  #toolbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "start end" "status status"; gap: 6px 8px; padding: 6px 12px }
-  #status-card { justify-self: stretch }
+  #toolbar { gap: 8px; padding: 6px 12px }
+  #status-card { margin-top: 10px }
   #user-info { display: none }
   #btn-clock { min-width: 0 }
   .day { padding: 12px 12px 8px }
