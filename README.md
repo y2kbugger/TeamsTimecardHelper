@@ -58,9 +58,11 @@ uses Shifts.
 - The timeline's language, for cards and breaks alike: a white handle is a set time that drags; a
   sheen flowing toward now is still running. A card over 16 hours is red (most likely a clock-out
   forgotten overnight). Past days and card controls stay dim until pointed at.
-- Breaks are added on the timeline: hovering a card shows a ghost of a ten-minute break fitted
-  into the free time under the pointer, and Ctrl+click adds it (a plain click only selects). The
-  edit dialog changes and removes breaks.
+- Breaks and missed cards are added on the timeline, every day of the week up to today having
+  one: hovering a card shows a ghost of a ten-minute break fitted into its free time under the
+  pointer, hovering free time a ghost of a thirty-minute card (ending by now), and Ctrl+click adds
+  it (a plain click only selects). Its edges then drag like any other. The edit dialog changes and
+  removes breaks.
 - Weekly average: expected time is split evenly over the chosen workdays and counts only through
   today.
 

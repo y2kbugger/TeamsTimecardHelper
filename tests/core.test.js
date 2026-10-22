@@ -5,7 +5,7 @@ import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
-    getWorkSegments, isLongCard, buildDailyActuals, buildWeeklyModel,
+    getWorkSegments, isLongCard, proposeCard, buildNewTimeCardBody, buildDailyActuals, buildWeeklyModel,
     dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
 } from '../core.js';
 
@@ -87,21 +87,44 @@ test('week filter keeps overlapping cards, active card is the newest open one', 
     assert.equal(findActiveCard(cards.slice(0, 3)), null);
 });
 
-test('week days: newest first, cards listed newest first on their clock-in day', () => {
+test('week days: every day begun, newest first, cards listed newest first on their clock-in day', () => {
     const days = buildWeekDays([
         card({ id: 'a', clockIn: '2026-10-19T09:00', clockOut: '2026-10-19T10:00' }),
         card({ id: 'b', clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T10:00' }),
         card({ id: 'c', clockIn: '2026-10-19T13:00', clockOut: '2026-10-19T14:00' }),
-    ], parseLocalDate('2026-10-18'), local('2026-10-22T00:00').getTime());
+    ], parseLocalDate('2026-10-18'), local('2026-10-21T23:00').getTime());
     assert.deepEqual(days.map(d => [day(d.dayStart), d.listed.map(c => c.id).join(''), d.workedMs / 3600e3]),
-        [['2026-10-21', 'b', 1], ['2026-10-19', 'ca', 2]]);
+        [['2026-10-21', 'b', 1], ['2026-10-20', '', 0], ['2026-10-19', 'ca', 2], ['2026-10-18', '', 0]]);
 });
 
 test('week days: a card past midnight is drawn on both days and its time split between them', () => {
     const days = buildWeekDays([card({ id: 'late', clockIn: '2026-10-19T22:00', clockOut: '2026-10-20T01:00' })],
-        parseLocalDate('2026-10-18'), local('2026-10-22T00:00').getTime());
+        parseLocalDate('2026-10-18'), local('2026-10-20T12:00').getTime());
     assert.deepEqual(days.map(d => [day(d.dayStart), d.listed.length, d.drawn.length, d.workedMs / 3600e3]),
-        [['2026-10-20', 0, 1, 1], ['2026-10-19', 1, 1, 2]]);
+        [['2026-10-20', 0, 1, 1], ['2026-10-19', 1, 1, 2], ['2026-10-18', 0, 0, 0]]);
+});
+
+test('new card: 30 minutes centred and snapped, between cards, never past now', () => {
+    const at = s => local(s).getTime();
+    const day = { dayStartMs: at('2026-10-21T00:00'), dayEndMs: at('2026-10-22T00:00') };
+    const now = at('2026-10-21T18:00');
+    const cards = [
+        card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:00' }),
+        card({ clockIn: '2026-10-21T12:20', clockOut: '2026-10-21T15:00' }),
+    ];
+    const hm = ({ startMs, endMs }) => `${local(startMs).toTimeString().slice(0, 5)}-${local(endMs).toTimeString().slice(0, 5)}`;
+    assert.equal(hm(proposeCard(cards, day, at('2026-10-21T16:02'), now)), '15:45-16:15');
+    assert.equal(hm(proposeCard(cards, day, at('2026-10-21T15:01'), now)), '15:00-15:30', 'held after the card before');
+    assert.equal(hm(proposeCard(cards, day, at('2026-10-21T12:10'), now)), '12:00-12:20', 'shorter in a 20-minute gap');
+    assert.equal(hm(proposeCard(cards, day, at('2026-10-21T17:55'), now)), '17:30-18:00', 'over by now');
+    assert.equal(hm(proposeCard([], day, at('2026-10-21T00:05'), now)), '00:00-00:30', 'inside the day');
+    assert.equal(proposeCard(cards, day, at('2026-10-21T10:00'), now), null, 'not on a card');
+    assert.equal(proposeCard(cards, day, at('2026-10-21T18:30'), now), null, 'not after now');
+    const ragged = [card({ clockIn: '2026-10-21T09:00', clockOut: '2026-10-21T12:03' }), card({ clockIn: '2026-10-21T12:07', clockOut: '2026-10-21T13:00' })];
+    assert.equal(proposeCard(ragged, day, at('2026-10-21T12:05'), now), null, 'no snap fits between 12:03 and 12:07');
+    const body = buildNewTimeCardBody({ startMs: at('2026-10-21T16:00'), endMs: at('2026-10-21T16:30') });
+    assert.deepEqual(Object.keys(body), ['clockInEvent', 'clockOutEvent', 'breaks']);
+    assert.equal(body.clockOutEvent.dateTime, local('2026-10-21T16:30').toISOString());
 });
 
 test('week days: a running card counts up to now', () => {

@@ -422,6 +422,37 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
+        name: 'ctrl-click-on-free-time-adds-a-card',
+        run: () => withApp(async app => {
+            const { block } = seededBlock(app);
+            const axis = block.parentElement;
+            const cards = mockCards().length;
+            app.pointer('pointermove', axis, app.xAt(axis, 14, 2));
+            const ghost = app.$('.card-ghost');
+            check(ghost?.title.includes('1:45') && ghost.title.includes('2:15'), `a 30-minute card offered, 1:45-2:15: ${ghost?.title}`);
+            check(!app.$('.break-ghost'), 'not a break');
+            axis.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, clientX: app.xAt(axis, 14, 2) }));
+            await app.settled('anything a plain click set off');
+            check(mockCards().length === cards, 'a plain click adds nothing');
+            app.pointer('pointermove', axis, app.xAt(axis, 14, 2));
+            axis.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, ctrlKey: true, clientX: app.xAt(axis, 14, 2) }));
+            await waitFor('the new card', () => mockCards().length === cards + 1);
+            const added = mockCards().at(-1);
+            check(`${localTime(added.clockInEvent.dateTime)}-${localTime(added.clockOutEvent.dateTime)}` === '13:45-14:15', `added 13:45-14:15: ${JSON.stringify(added)}`);
+            await waitFor('the card on the timeline', () => app.$(`.tc-block[data-card-id="${added.id}"]`));
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'an-empty-past-day-has-a-timeline',
+        run: () => withApp(async app => {
+            const days = app.$$('.day');
+            check(days.length === 7, `all seven days of a past week: ${days.length}`);
+            check(days.every(day => day.querySelector('.timeline')), 'each with a timeline');
+            return {};
+        }, { week: addDays(new Date(), -21) }),
+    },
+    {
         name: 'a-plain-click-adds-no-break',
         run: () => withApp(async app => {
             const { block, card } = seededBlock(app);

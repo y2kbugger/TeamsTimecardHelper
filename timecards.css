@@ -98,18 +98,21 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
   background: repeating-linear-gradient(135deg, #f0a843 0 4px, #d68f2d 4px 8px);
   opacity: .92;
 }
-/* The break a Ctrl+click would add: a faint hint, armed (filled) while Ctrl is held. */
-.break-ghost {
+/* What a Ctrl+click would add, a break on a card or a card on free time: a faint dashed hint where
+   it would go, armed (filled) while Ctrl is held. */
+.ghost {
+  --ghost: var(--warn);
   position: absolute;
   top: 9px;
   bottom: 9px;
   z-index: 2;
   display: flex;
-  border: 1px dashed rgba(240, 168, 67, .55);
+  border: 1px dashed color-mix(in srgb, var(--ghost) 55%, transparent);
   pointer-events: none;
 }
-.break-ghost[data-align="end"] { justify-content: flex-end }
-.break-ghost::after {
+.card-ghost { --ghost: #8b96ff; top: 5px; bottom: 5px }
+.ghost[data-align="end"] { justify-content: flex-end }
+.ghost::after {
   content: attr(title);
   position: absolute;
   bottom: calc(100% + 12px);
@@ -121,9 +124,9 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
   font: 600 .7rem var(--mono);
   white-space: nowrap;
 }
-.break-ghost.is-armed { background: rgba(240, 168, 67, .35); border-color: var(--warn) }
-.break-ghost.is-armed::after { border-color: var(--warn); color: var(--warn) }
-body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
+.ghost.is-armed { background: color-mix(in srgb, var(--ghost) 35%, transparent); border-color: var(--ghost) }
+.ghost.is-armed::after { border-color: var(--ghost); color: var(--ghost) }
+body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
 .is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
 /* The part of a card past midnight, on the next day: worked on in the day it clocked in. */
@@ -150,6 +153,7 @@ body.ctrl-held .tc-block:not(.is-dragging) { cursor: copy }
 
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 
+.card-list:empty { display: none }
 .card-list { display: grid; gap: 6px; max-width: 600px; margin: 12px auto 0 }
 .card { padding: 7px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s }
 .card.is-highlighted { border-color: var(--success) }

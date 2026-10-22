@@ -160,9 +160,9 @@ export function workedMs(card, nowMs = Date.now()) {
     return Math.max(0, cardEndMs(card, nowMs) - cardStartMs(card) - breakMs);
 }
 
-// The days of a week that have anything to show, newest first. A card is listed on the day it
-// clocked in and drawn on every day it spans (one past midnight shows on both). Worked time is
-// split at midnight, so the day totals add up to the week's.
+// The days of a week that have begun, newest first, empty ones too: a missed day is added on its
+// timeline. A card is listed on the day it clocked in and drawn on every day it spans (one past
+// midnight shows on both). Worked time is split at midnight, so the day totals add up to the week's.
 export function buildWeekDays(cards, weekStart, nowMs = Date.now()) {
     const weekStartMs = weekStart.getTime();
     const weekEndMs = addDays(weekStart, 7).getTime();
@@ -177,7 +177,7 @@ export function buildWeekDays(cards, weekStart, nowMs = Date.now()) {
             .sort((a, b) => getCardSortMs(b) - getCardSortMs(a));
         const drawn = cards.filter(card => card.clockIn
             && cardStartMs(card) < dayEndMs && cardEndMs(card, nowMs) > dayStartMs);
-        if (!listed.length && !drawn.length) continue;
+        if (dayStartMs > nowMs && !listed.length && !drawn.length) continue;
         const workedMs = actuals.get(formatDateInputValue(dayStart)) || 0;
         days.push({ dayStart, dayStartMs, dayEndMs, listed, drawn, workedMs });
     }
@@ -252,6 +252,31 @@ export function proposeBreak(card, atMs, nowMs = Date.now()) {
     if (lengthMs < SNAP_MS) return null;
     const breakStartMs = clamp(snapMs(atMs - lengthMs / 2), gapStartMs, gapEndMs - lengthMs);
     return { startMs: breakStartMs, endMs: breakStartMs + lengthMs };
+}
+
+export const CARD_DEFAULT_MS = 30 * 60 * 1000;
+
+// A new card around atMs, as proposeBreak is for a break: CARD_DEFAULT_MS long (shorter in a
+// smaller gap), snapped, inside the day and the free time between cards that holds atMs, and over
+// by now. Null on a card, after now, or in a gap shorter than one snap.
+export function proposeCard(cards, day, atMs, nowMs = Date.now()) {
+    if (!(atMs >= day.dayStartMs && atMs < Math.min(day.dayEndMs, nowMs))) return null;
+    const spans = cards.filter(card => card.clockIn).map(card => ({ startMs: cardStartMs(card), endMs: cardEndMs(card, nowMs) }));
+    if (spans.some(span => atMs >= span.startMs && atMs <= span.endMs)) return null;
+    // The gap snapped inward to the 5-minute grid, so the new card's times are on it too.
+    const gapStartMs = Math.ceil(Math.max(day.dayStartMs, ...spans.filter(span => span.endMs < atMs).map(span => span.endMs)) / SNAP_MS) * SNAP_MS;
+    const gapEndMs = Math.floor(Math.min(day.dayEndMs, nowMs, ...spans.filter(span => span.startMs > atMs).map(span => span.startMs)) / SNAP_MS) * SNAP_MS;
+    const lengthMs = Math.min(CARD_DEFAULT_MS, gapEndMs - gapStartMs);
+    if (lengthMs < SNAP_MS) return null;
+    const startMs = clamp(snapMs(atMs - lengthMs / 2), gapStartMs, gapEndMs - lengthMs);
+    return { startMs, endMs: startMs + lengthMs };
+}
+
+// The body of POST /teams/{id}/schedule/timeCards: a finished card with no breaks.
+export function buildNewTimeCardBody({ startMs, endMs }) {
+    assert(startMs < endMs, 'a card ends after it starts');
+    const event = timeMs => ({ dateTime: new Date(timeMs).toISOString(), atApprovedLocation: false });
+    return { clockInEvent: event(startMs), clockOutEvent: event(endMs), breaks: [] };
 }
 
 export function addBreak(card, { startMs, endMs }) {

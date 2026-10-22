@@ -2,9 +2,10 @@
 // daylight saving days), dragging their edges, and adding breaks. A drag previews the snapped,
 // clamped time and saves only on release; Escape cancels. While a drag runs the app holds back
 // re-renders, so a background refresh cannot pull the block from under the pointer. Hovering a
-// card shows a faint ghost of the break a Ctrl+click would add there; holding Ctrl arms it. A plain
-// click only selects, so a click meant to select never adds a break to a real timecard.
-import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, isLongCard, proposeBreak } from './core.js';
+// card shows a faint ghost of the break a Ctrl+click would add there, hovering free time one of a
+// card; holding Ctrl arms it. A plain click only selects, so a click meant to select never adds
+// anything to a real timesheet.
+import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, isLongCard, proposeBreak, proposeCard } from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
 const BLOCK_WIDTH_MIN_PERCENT = 0.15;
@@ -13,8 +14,9 @@ const hourFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 let drag = null; // the drag in progress, see startDrag
-// { element, cardId, proposal } while a new break is offered. Never during a drag, so the click
-// that follows a drag's release finds none and adds nothing.
+// { element, kind: 'break' | 'card', cardId (a break's card), proposal } while something new is
+// offered. Never during a drag, so the click that follows a drag's release finds none and adds
+// nothing.
 let ghost = null;
 
 export function isDragging() {
@@ -134,8 +136,9 @@ export function updateRunningSpans(root, cardsById, nowMs) {
 
 // ── Dragging ────────────────────────────────────────────────────────────────
 
-// handlers: { cardById(id), onCommit(updatedCard, movedMs), onEnd(committed), onSelect(cardId),
-//             onAddBreak(card, { startMs, endMs }), tooltip }
+// handlers: { cardById(id), cards(), onCommit(updatedCard, movedMs), onEnd(committed),
+//             onSelect(cardId), onAddBreak(card, { startMs, endMs }), onAddCard({ startMs, endMs }),
+//             tooltip }. cardById and cards answer nothing while no change may be made.
 export function attachTimeline(root, handlers) {
     root.addEventListener('pointerdown', event => {
         const span = event.target.closest('.tc-block, .break-overlay');
@@ -150,12 +153,15 @@ export function attachTimeline(root, handlers) {
     root.addEventListener('pointermove', event => updateGhost(event, handlers));
     root.addEventListener('pointerleave', hideGhost);
     root.addEventListener('click', event => {
-        const block = event.target.closest('.tc-block');
-        // Only the ghost on show: a re-render since it was offered leaves it detached and stale.
-        if (!event.ctrlKey || !block || !ghost?.element.isConnected || ghost.cardId !== block.dataset.cardId) return;
-        const card = handlers.cardById(ghost.cardId);
-        const { proposal } = ghost;
+        // Only the ghost on show, and only where it was offered: a re-render since leaves it
+        // detached and stale.
+        if (!event.ctrlKey || !ghost?.element.isConnected) return;
+        const target = ghostTarget(event);
+        if (target?.kind !== ghost.kind || target.cardId !== ghost.cardId || target.axis !== ghost.element.parentElement) return;
+        const { kind, cardId, proposal } = ghost;
         hideGhost();
+        if (kind === 'card') return handlers.onAddCard(proposal);
+        const card = handlers.cardById(cardId);
         if (card) handlers.onAddBreak(card, proposal);
     });
     window.addEventListener('keydown', event => {
@@ -176,29 +182,50 @@ function armGhost(armed) {
     if (!ghost) return;
     const range = `${timeFormat.format(ghost.proposal.startMs)} → ${timeFormat.format(ghost.proposal.endMs)}`;
     ghost.element.classList.toggle('is-armed', armed);
-    ghost.element.title = armed ? `+ break ${range}` : `Ctrl+click: break ${range}`;
+    ghost.element.title = armed ? `+ ${ghost.kind} ${range}` : `Ctrl+click: ${ghost.kind} ${range}`;
 }
 
-// The break a click would add, under the pointer on a card's block (not on a handle or a break).
-function updateGhost(event, handlers) {
-    const block = drag ? null : event.target.closest('.tc-block');
-    const card = block && !event.target.closest('.resize-handle') && handlers.cardById(block.dataset.cardId);
-    if (!card) return hideGhost();
-    const axis = block.parentElement;
+// What a Ctrl+click under the pointer would add: a break on a card's block, a card on free time.
+// Nothing on a handle or a break, or during a drag.
+function ghostOffer(event, handlers) {
+    const target = ghostTarget(event);
+    if (!target) return null;
+    const { axis } = target;
     const day = { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
     const rect = axis.getBoundingClientRect();
     const atMs = day.dayStartMs + ((event.clientX - rect.left) / rect.width) * (day.dayEndMs - day.dayStartMs);
-    const proposal = proposeBreak(card, atMs, Date.now());
-    if (!proposal) return hideGhost();
+    if (target.kind === 'break') {
+        const card = handlers.cardById(target.cardId);
+        const proposal = card && proposeBreak(card, atMs, Date.now());
+        return proposal ? { kind: 'break', cardId: card.id, axis, day, proposal } : null;
+    }
+    const cards = handlers.cards();
+    const proposal = cards && proposeCard(cards, day, atMs, Date.now());
+    return proposal ? { kind: 'card', cardId: null, axis, day, proposal } : null;
+}
+
+// Where the pointer is, for a ghost: { kind: 'break', cardId } on a card's block, { kind: 'card' }
+// on the free time of an axis, null elsewhere.
+function ghostTarget(event) {
+    const axis = event.target.closest('.timeline');
+    if (drag || !axis || event.target.closest('.resize-handle, .break-overlay, .hour-label')) return null;
+    const block = event.target.closest('.tc-block');
+    return block ? { kind: 'break', cardId: block.dataset.cardId, axis } : { kind: 'card', cardId: null, axis };
+}
+
+function updateGhost(event, handlers) {
+    const offer = ghostOffer(event, handlers);
+    if (!offer) return hideGhost();
+    const { axis, day, proposal } = offer;
     if (!ghost) ghost = { element: document.createElement('div') };
     const { element } = ghost;
-    element.className = 'break-ghost';
+    element.className = `ghost ${offer.kind}-ghost`;
     place(element, day, proposal.startMs, proposal.endMs);
     // Its label reaches toward the middle of the axis, so it never leaves the page.
     const middleMs = (proposal.startMs + proposal.endMs) / 2;
     element.dataset.align = middleMs < (day.dayStartMs + day.dayEndMs) / 2 ? 'start' : 'end';
     if (element.parentElement !== axis) axis.appendChild(element);
-    Object.assign(ghost, { cardId: card.id, proposal });
+    Object.assign(ghost, { kind: offer.kind, cardId: offer.cardId, proposal });
     armGhost(event.ctrlKey);
 }
 

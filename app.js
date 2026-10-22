@@ -4,7 +4,7 @@
 import * as auth from './auth.js';
 import { $, escHtml, toast, showError } from './ui.js';
 import {
-    addDays, assert, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, filterCardsForWeek,
+    addDays, assert, buildNewTimeCardBody, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, filterCardsForWeek,
     dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
     getDayStart, getWeekRange, getWeekStart, isLongCard, isSameDay, normalizeCard, parseLocalDate,
     addBreak, readEditForm, toLocalDatetimeInput, workedMs,
@@ -114,10 +114,14 @@ function bindEvents() {
     attachTimeline(el.weeks, {
         // None while a change is on its way: a drag of the card as it was would undo the change.
         cardById: id => (state.changesInFlight ? undefined : state.cards.find(card => card.id === id)),
+        cards: () => (state.changesInFlight ? null : state.cards),
         onSelect: highlightCard,
         onCommit: (card, movedMs) => void saveCard(card, `Moved to ${timeFormat.format(movedMs)}`),
         onAddBreak: (card, proposal) => void saveCard(addBreak(card, proposal),
             `Break added ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`),
+        onAddCard: proposal => void change(null,
+            `Card added ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`,
+            () => auth.graphFetch(timeCardsPath(state.team.id), { method: 'POST', body: JSON.stringify(buildNewTimeCardBody(proposal)) })),
         // A saved drag is drawn by the read-back after the save; drawing now would snap it back.
         onEnd: committed => { if (!committed) render(); },
         tooltip: {

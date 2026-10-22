@@ -97,6 +97,14 @@ export async function mockGraphFetch(url, options = {}) {
     if (!match || match[1] !== MOCK_TEAM.id) throw graphError(404, `Mock Graph has no route for ${method} ${path}`, 'NotFound');
     const [, , idOrAction, action] = match;
 
+    if (!idOrAction && method === 'POST') {
+        if (!body?.clockInEvent?.dateTime) throw graphError(400, 'clockInEvent is required.');
+        const card = makeCard(`mock-${db.nextId++}`, body.clockInEvent.dateTime, body.clockOutEvent?.dateTime || null, body.breaks || []);
+        db.cards.push(card);
+        writeDb(db);
+        return card; // 201 Created, with the card
+    }
+
     if (!idOrAction) {
         if (method !== 'GET') throw graphError(405, 'Method not allowed');
         const top = Number(searchParams.get('$top') || 100);
