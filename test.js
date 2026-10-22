@@ -444,6 +444,22 @@ const mockTests = [
         }, { week: lastWeek() }),
     },
     {
+        name: 'the-now-line-moves-at-once-on-return-to-the-tab',
+        // As the running spans do: from the clock, not after the read the return also starts.
+        run: () => withApp(async app => {
+            const line = app.$('.day.is-today .now-line');
+            check(line, 'a now line on today');
+            const placed = line.style.left;
+            line.style.left = '0%';
+            app.doc.dispatchEvent(new app.win.Event('visibilitychange'));
+            const moved = app.$('.day.is-today .now-line').style.left;
+            // Within a minute of where it was (a minute is 0.07% of a day).
+            check(Math.abs(parseFloat(moved) - parseFloat(placed)) < 0.07, `back in place before any read: ${moved} vs ${placed}`);
+            await app.settled('the read');
+            return {};
+        }),
+    },
+    {
         name: 'an-empty-past-day-has-a-timeline',
         run: () => withApp(async app => {
             const days = app.$$('.day');

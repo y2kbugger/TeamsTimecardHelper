@@ -73,14 +73,30 @@ export function renderTimeline(day, nowMs) {
         label.textContent = hourFormat.format(at);
         axis.appendChild(label);
     }
-    if (nowMs > day.dayStartMs && nowMs < day.dayEndMs) {
-        const now = document.createElement('div');
-        now.className = 'now-line';
-        now.style.left = `${percentOfDay(day, nowMs)}%`;
-        axis.appendChild(now);
-    }
+    placeNowLine(axis, day, nowMs);
     day.drawn.forEach(card => appendCard(axis, day, card, nowMs));
     return axis;
+}
+
+// The now line, on today's axis only. Moved every second with the running spans, not only when
+// the week is drawn, so it never lags them (on returning to the tab, say).
+function placeNowLine(axis, day, nowMs) {
+    let line = axis.querySelector('.now-line');
+    if (!(nowMs > day.dayStartMs && nowMs < day.dayEndMs)) return line?.remove();
+    if (!line) {
+        line = document.createElement('div');
+        line.className = 'now-line';
+        axis.prepend(line);
+    }
+    line.style.left = `${percentOfDay(day, nowMs)}%`;
+}
+
+export function updateNowLines(root, nowMs) {
+    root.querySelectorAll('.timeline').forEach(axis => placeNowLine(axis, axisDay(axis), nowMs));
+}
+
+function axisDay(axis) {
+    return { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
 }
 
 function appendCard(axis, day, card, nowMs) {
@@ -124,7 +140,7 @@ export function updateRunningSpans(root, cardsById, nowMs) {
         const card = cardsById.get(element.dataset.cardId);
         if (!card) return;
         const axis = element.parentElement;
-        const day = { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
+        const day = axisDay(axis);
         const breakIndex = element.dataset.breakIndex;
         if (breakIndex === undefined) element.classList.toggle('is-long', isLongCard(card, nowMs));
         const startMs = breakIndex === undefined
@@ -191,7 +207,7 @@ function ghostOffer(event, handlers) {
     const target = ghostTarget(event);
     if (!target) return null;
     const { axis } = target;
-    const day = { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
+    const day = axisDay(axis);
     const rect = axis.getBoundingClientRect();
     const atMs = day.dayStartMs + ((event.clientX - rect.left) / rect.width) * (day.dayEndMs - day.dayStartMs);
     if (target.kind === 'break') {
@@ -245,7 +261,7 @@ function startDrag(event, element, handle, handlers) {
         card,
         breakIndex: element.dataset.breakIndex === undefined ? null : Number(element.dataset.breakIndex),
         edge: handle.dataset.edge,
-        day: { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) },
+        day: axisDay(axis),
         axisRect: axis.getBoundingClientRect(),
         result: null,
     };

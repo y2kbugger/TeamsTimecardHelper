@@ -9,7 +9,7 @@ import {
     getDayStart, getWeekRange, getWeekStart, isLongCard, isSameDay, normalizeCard, parseLocalDate,
     addBreak, readEditForm, toLocalDatetimeInput, workedMs,
 } from './core.js';
-import { attachTimeline, isDragging, renderTimeline, updateRunningSpans } from './timeline.js';
+import { attachTimeline, isDragging, renderTimeline, updateNowLines, updateRunningSpans } from './timeline.js';
 import { mockEnabled } from './mockgraph.js';
 
 // Mock mode keeps its own keys, so it never disturbs a real session in another tab.
@@ -41,6 +41,7 @@ const state = {
     activeCard: null, // the open card, from the current week whatever week is shown
     highlightedCardId: null,
     renderHeld: false, // a render was asked for during a drag
+    renderedDayKey: '', // today, when the week was last drawn; a new day draws it again
     busyCount: 0,
     changesInFlight: 0, // writes not yet read back; until then the cards held are out of date
     weekLoad: null, // { key, promise } while a week loads
@@ -109,7 +110,12 @@ function bindEvents() {
     });
     document.addEventListener('pointerdown', noteActivity, true);
     document.addEventListener('keydown', noteActivity, true);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) onBackgroundTick(); });
+    // Back on the tab: the clock's part at once, then Graph's when the read comes back.
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        onLiveTick();
+        onBackgroundTick();
+    });
     el.weeks.addEventListener('click', onWeeksClick);
     attachTimeline(el.weeks, {
         // None while a change is on its way: a drag of the card as it was would undo the change.
@@ -357,6 +363,7 @@ function render() {
     syncWeekControls();
     renderClockButton();
     const nowMs = Date.now();
+    state.renderedDayKey = weekKey(getDayStart(nowMs));
     const days = buildWeekDays(state.cards, state.weekStart, nowMs);
     const latestId = state.cards.reduce((latest, card) => (!latest || getCardSortMs(card) > getCardSortMs(latest) ? card : latest), null)?.id;
     el.weeks.replaceChildren(...(days.length
@@ -473,10 +480,19 @@ function highlightCard(cardId) {
     });
 }
 
+// Every second, and at once on returning to the tab: what depends on the clock and not on Graph.
+// What a render decides once (which day is today, which days have begun, a card's "over 16 h")
+// is drawn again when the clock changes it, without waiting for the next read.
 function onLiveTick() {
-    const running = state.cards.filter(card => !card.clockOut);
-    if (!running.length || el.weeks.hidden) return;
+    if (el.weeks.hidden || !state.weekStart) return;
     const nowMs = Date.now();
+    const running = state.cards.filter(card => !card.clockOut);
+    const turnedLong = running.some(card =>
+        el.weeks.querySelector(`.card[data-card-id="${CSS.escape(card.id)}"]`)?.classList.contains('is-long') === false
+        && isLongCard(card, nowMs));
+    if (state.renderedDayKey !== weekKey(getDayStart(nowMs)) || turnedLong) return render();
+    updateNowLines(el.weeks, nowMs);
+    if (!running.length) return;
     renderTotals(buildWeekDays(state.cards, state.weekStart, nowMs));
     running.forEach(card => {
         const worked = el.weeks.querySelector(`[data-worked="${CSS.escape(card.id)}"]`);
