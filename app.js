@@ -107,12 +107,18 @@ function bindEvents() {
         if (event.key !== 'Escape') return;
         if (!el.confirmModal.hidden) closeConfirm(false);
         else if (!el.editModal.hidden) closeEditDialog();
+        else highlightCard(null);
+    });
+    // A click away from every card lets go of the selected one; one in a dialog is about it.
+    document.addEventListener('pointerdown', event => {
+        if (!event.target.closest('[data-card-id], .modal-overlay')) highlightCard(null);
     });
     document.addEventListener('pointerdown', noteActivity, true);
     document.addEventListener('keydown', noteActivity, true);
     // Back on the tab: the clock's part at once, then Graph's when the read comes back.
+    // Leaving the tab lets go of the selected card, as a click away does.
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) return;
+        if (document.hidden) return highlightCard(null);
         onLiveTick();
         onBackgroundTick();
     });

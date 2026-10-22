@@ -460,6 +460,31 @@ const mockTests = [
         }),
     },
     {
+        name: 'a-click-away-or-escape-lets-go-of-the-selection',
+        run: () => withApp(async app => {
+            const selected = () => app.$$('.is-highlighted').length;
+            const { block } = seededBlock(app);
+            app.pointer('pointerdown', block, 0);
+            check(selected() > 0, 'pressing a card selects it');
+            app.pointer('pointerdown', app.$('#toolbar'), 0);
+            check(selected() === 0, `a click away lets go: ${selected()} still selected`);
+            app.click(`.card[data-card-id="${block.dataset.cardId}"] [data-action="edit"]`);
+            await waitFor('the edit dialog', () => !app.$('#edit-modal').hidden);
+            app.pointer('pointerdown', app.$('#edit-notes'), 0);
+            check(selected() > 0, 'a click in its dialog keeps it');
+            app.doc.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            check(app.$('#edit-modal').hidden && selected() > 0, 'the first Escape closes the dialog only');
+            app.doc.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            check(selected() === 0, 'the next lets go');
+            app.pointer('pointerdown', block, 0);
+            Object.defineProperty(app.doc, 'hidden', { value: true, configurable: true });
+            app.doc.dispatchEvent(new app.win.Event('visibilitychange'));
+            delete app.doc.hidden;
+            check(selected() === 0, 'leaving the tab lets go');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
         name: 'an-empty-past-day-has-a-timeline',
         run: () => withApp(async app => {
             const days = app.$$('.day');
