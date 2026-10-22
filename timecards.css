@@ -102,7 +102,7 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
   border-radius: 8px;
   background:
     linear-gradient(rgba(255, 255, 255, .025), rgba(255, 255, 255, .025)),
-    repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px calc(100% / 24));
+    repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px calc(100% / var(--hours, 24)));
 }
 .hour-label { position: absolute; top: -17px; transform: translateX(-50%); color: var(--text2); font-size: .6rem; white-space: nowrap }
 .now-line { position: absolute; top: -4px; bottom: -4px; z-index: 3; width: 2px; margin-left: -1px; background: var(--danger); border-radius: 1px; pointer-events: none }

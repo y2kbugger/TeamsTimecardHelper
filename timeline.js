@@ -5,7 +5,9 @@
 // card shows a faint ghost of the break a Ctrl+click would add there, hovering free time one of a
 // card; holding Ctrl arms it. A plain click only selects, so a click meant to select never adds
 // anything to a real timesheet.
-import { applyDrag, assert, cardEndMs, cardStartMs, dragBounds, isLongCard, proposeBreak, proposeCard } from './core.js';
+import {
+    applyDrag, assert, cardEndMs, cardStartMs, dragBounds, FULL_DAY_HOURS, isLongCard, proposeBreak, proposeCard,
+} from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
 const BLOCK_WIDTH_MIN_PERCENT = 0.15;
@@ -58,24 +60,37 @@ function makeSpan(className, day, { cardId, breakIndex, startMs, endMs, card, no
     return element;
 }
 
-// day: one entry of core's buildWeekDays.
-export function renderTimeline(day, nowMs) {
-    const axis = document.createElement('div');
-    axis.className = 'timeline';
-    axis.dataset.dayStartMs = String(day.dayStartMs);
-    axis.dataset.dayEndMs = String(day.dayEndMs);
-    for (let hour = HOUR_LABEL_EVERY_HOURS; hour < 24; hour += HOUR_LABEL_EVERY_HOURS) {
+// day: one entry of core's buildWeekDays. hours: the part of the day the axis spans, { start, end }
+// in whole hours since midnight (core's weekHourWindow on a narrow screen), the whole day by
+// default. The axis's data-day-start-ms and data-day-end-ms are that span, which every position
+// on it is a fraction of.
+export function renderTimeline(day, nowMs, hours = FULL_DAY_HOURS) {
+    const atHour = hour => {
         const at = new Date(day.dayStartMs);
         at.setHours(hour);
+        return at.getTime();
+    };
+    const view = { dayStartMs: atHour(hours.start), dayEndMs: hours.end === 24 ? day.dayEndMs : atHour(hours.end) };
+    assert(view.dayStartMs < view.dayEndMs, 'an axis spans some time');
+    const axis = document.createElement('div');
+    axis.className = 'timeline';
+    axis.dataset.dayStartMs = String(view.dayStartMs);
+    axis.dataset.dayEndMs = String(view.dayEndMs);
+    axis.style.setProperty('--hours', String(hours.end - hours.start));
+    // The whole day labels every other hour, and a narrow screen every sixth (the rest are
+    // minor); a window labels every hour, and a narrow screen every other one past 8 hours.
+    const fullDay = hours.start === 0 && hours.end === 24;
+    const step = fullDay ? HOUR_LABEL_EVERY_HOURS : 1;
+    for (let hour = hours.start + step; hour < hours.end; hour += step) {
+        const minor = fullDay ? hour % 6 : hours.end - hours.start > 8 && hour % 2;
         const label = document.createElement('div');
-        // A narrow screen labels every sixth hour only.
-        label.className = hour % 6 ? 'hour-label hour-minor' : 'hour-label';
-        label.style.left = `${percentOfDay(day, at.getTime())}%`;
-        label.textContent = hourFormat.format(at);
+        label.className = minor ? 'hour-label hour-minor' : 'hour-label';
+        label.style.left = `${percentOfDay(view, atHour(hour))}%`;
+        label.textContent = hourFormat.format(atHour(hour));
         axis.appendChild(label);
     }
-    placeNowLine(axis, day, nowMs);
-    day.drawn.forEach(card => appendCard(axis, day, card, nowMs));
+    placeNowLine(axis, view, nowMs);
+    day.drawn.forEach(card => appendCard(axis, day, view, card, nowMs));
     return axis;
 }
 
@@ -100,11 +115,14 @@ function axisDay(axis) {
     return { dayStartMs: Number(axis.dataset.dayStartMs), dayEndMs: Number(axis.dataset.dayEndMs) };
 }
 
-function appendCard(axis, day, card, nowMs) {
+// day: the calendar day (which card is at home here); view: the part of it the axis spans.
+function appendCard(axis, day, view, card, nowMs) {
     const startMs = cardStartMs(card);
     const endMs = cardEndMs(card, nowMs);
+    // Outside the window (only a ghost can be): nothing, rather than a sliver at its edge.
+    if (endMs <= view.dayStartMs || startMs >= view.dayEndMs) return;
     const overflow = startMs < day.dayStartMs;
-    const block = makeSpan('tc-block', day, {
+    const block = makeSpan('tc-block', view, {
         cardId: card.id, breakIndex: null, startMs, endMs, card, nowMs, overflow,
         title: `${timeFormat.format(startMs)} → ${card.clockOut ? timeFormat.format(endMs) : 'now'}`,
     });
@@ -124,8 +142,8 @@ function appendCard(axis, day, card, nowMs) {
         if (!b.start) return;
         const breakStartMs = new Date(b.start.dateTime).getTime();
         const breakEndMs = b.end ? new Date(b.end.dateTime).getTime() : nowMs;
-        if (breakEndMs <= day.dayStartMs || breakStartMs >= day.dayEndMs) return;
-        const overlay = makeSpan('break-overlay', day, {
+        if (breakEndMs <= view.dayStartMs || breakStartMs >= view.dayEndMs) return;
+        const overlay = makeSpan('break-overlay', view, {
             cardId: card.id, breakIndex, startMs: breakStartMs, endMs: breakEndMs, card, nowMs, overflow,
             title: `Break ${timeFormat.format(breakStartMs)} → ${b.end ? timeFormat.format(breakEndMs) : 'now'}`,
         });

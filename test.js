@@ -559,6 +559,29 @@ const mockTests = [
         }, { width: 390 }),
     },
     {
+        name: 'a-phone-spans-the-hours-of-the-weeks-cards',
+        // Last week's seeded cards all run 09:00-12:00.
+        run: () => withApp(async app => {
+            const timelines = app.$$('.timeline');
+            const hourOf = ms => new Date(Number(ms)).getHours();
+            const spans = [...new Set(timelines.map(t => `${hourOf(t.dataset.dayStartMs)}-${hourOf(t.dataset.dayEndMs)}`))];
+            check(spans.length === 1 && spans[0] === '9-12', `every day spans 9 to 12: ${spans.join(', ')}`);
+            const { block } = seededBlock(app);
+            const axis = block.parentElement.getBoundingClientRect();
+            const bar = block.getBoundingClientRect();
+            check(Math.abs(bar.left - axis.left) < 2 && Math.abs(bar.right - axis.right) < 2, 'a 9-12 card fills its axis');
+            return {};
+        }, { week: lastWeek(), width: 390 }),
+    },
+    {
+        name: 'a-wide-screen-spans-the-whole-day',
+        run: () => withApp(async app => {
+            const timeline = app.$('.timeline');
+            check(Number(timeline.dataset.dayEndMs) - Number(timeline.dataset.dayStartMs) >= 23 * 3600e3, 'the whole day');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
         name: 'an-empty-past-day-has-a-timeline',
         run: () => withApp(async app => {
             const days = app.$$('.day');

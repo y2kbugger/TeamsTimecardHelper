@@ -6,7 +6,7 @@ import { $, escHtml, toast, showError } from './ui.js';
 import {
     addDays, assert, buildNewTimeCardBody, buildTimeCardUpdateBody, buildUpdatedCard, buildWeekDays, filterCardsForWeek,
     dedupeCardsById, findActiveCard, formatDateInputValue, formatDurationHms, getCardSortMs,
-    getDayStart, getWeekRange, getWeekStart, isLongCard, isSameDay, normalizeCard, parseLocalDate,
+    FULL_DAY_HOURS, getDayStart, getWeekRange, getWeekStart, isLongCard, isSameDay, normalizeCard, weekHourWindow, parseLocalDate,
     addBreak, readEditForm, toLocalDatetimeInput, workedMs,
 } from './core.js';
 import { attachTimeline, isDragging, renderTimeline, updateNowLines, updateRunningSpans } from './timeline.js';
@@ -42,6 +42,7 @@ const state = {
     highlightedCardId: null,
     renderHeld: false, // a render was asked for during a drag
     renderedDayKey: '', // today, when the week was last drawn; a new day draws it again
+    renderedHoursKey: '', // the hours the timelines span, when last drawn
     busyCount: 0,
     changesInFlight: 0, // writes not yet read back; until then the cards held are out of date
     weekLoad: null, // { key, promise } while a week loads
@@ -127,6 +128,7 @@ function bindEvents() {
         onBackgroundTick();
     });
     el.weeks.addEventListener('click', onWeeksClick);
+    narrowScreen.addEventListener('change', () => { if (state.team && !el.weeks.hidden) render(); });
     attachTimeline(el.weeks, {
         // None while a change is on its way: a drag of the card as it was would undo the change.
         cardById: id => (state.changesInFlight ? undefined : state.cards.find(card => card.id === id)),
@@ -383,15 +385,27 @@ function render() {
     const nowMs = Date.now();
     state.renderedDayKey = weekKey(getDayStart(nowMs));
     const days = buildWeekDays(state.cards, state.weekStart, nowMs);
+    const hours = timelineHours(days, nowMs);
+    state.renderedHoursKey = hoursKey(hours);
     const latestId = state.cards.reduce((latest, card) => (!latest || getCardSortMs(card) > getCardSortMs(latest) ? card : latest), null)?.id;
     el.weeks.replaceChildren(...(days.length
-        ? days.map(day => renderDay(day, nowMs, latestId))
+        ? days.map(day => renderDay(day, nowMs, latestId, hours))
         : [Object.assign(document.createElement('p'), { className: 'panel-empty', textContent: 'No timecards this week.' })]));
     showOnly(el.weeks);
     renderTotals(days);
     highlightCard(state.highlightedCardId);
     if (state.changesInFlight) disableActions();
 }
+
+// A narrow screen (as timecards.css has it) spans the hours the week's cards use, the same on
+// every day; a wide one the whole day.
+const narrowScreen = window.matchMedia('(max-width: 760px)');
+
+function timelineHours(days, nowMs) {
+    return narrowScreen.matches ? weekHourWindow(days, nowMs) : FULL_DAY_HOURS;
+}
+
+const hoursKey = hours => `${hours.start}-${hours.end}`;
 
 function disableActions() {
     for (const button of [el.btnClock, ...el.weeks.querySelectorAll('button')]) button.disabled = true;
@@ -407,7 +421,7 @@ function renderTotals(days) {
     });
 }
 
-function renderDay(day, nowMs, latestId) {
+function renderDay(day, nowMs, latestId, hours) {
     const section = document.createElement('section');
     section.className = 'day';
     section.classList.toggle('is-today', isSameDay(day.dayStart, new Date(nowMs)));
@@ -417,7 +431,7 @@ function renderDay(day, nowMs, latestId) {
             <h2>${dateFormat.format(day.dayStart)}</h2>
             <span class="day-total" data-day-total="${day.dayStartMs}"></span>
         </header>`;
-    section.appendChild(renderTimeline(day, nowMs));
+    section.appendChild(renderTimeline(day, nowMs, hours));
     const list = document.createElement('div');
     list.className = 'card-list';
     day.listed.forEach(card => list.appendChild(renderCard(card, card.id === latestId, nowMs)));
@@ -502,7 +516,10 @@ function onLiveTick() {
     if (state.renderedDayKey !== weekKey(getDayStart(nowMs)) || turnedLong) return render();
     updateNowLines(el.weeks, nowMs);
     if (!running.length) return;
-    renderTotals(buildWeekDays(state.cards, state.weekStart, nowMs));
+    const days = buildWeekDays(state.cards, state.weekStart, nowMs);
+    // A running card past the end of a narrow screen's window widens it.
+    if (hoursKey(timelineHours(days, nowMs)) !== state.renderedHoursKey) return render();
+    renderTotals(days);
     running.forEach(card => {
         const worked = el.weeks.querySelector(`[data-worked="${CSS.escape(card.id)}"]`);
         if (worked) worked.textContent = formatDurationHms(workedMs(card, nowMs));

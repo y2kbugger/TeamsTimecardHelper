@@ -184,6 +184,32 @@ export function buildWeekDays(cards, weekStart, nowMs = Date.now()) {
     return days;
 }
 
+export const FULL_DAY_HOURS = Object.freeze({ start: 0, end: 24 });
+
+const hoursIntoDay = timeMs => {
+    const d = new Date(timeMs);
+    return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+};
+
+// The whole hours that hold every card of the week on its own day (not a card's part past
+// midnight, a ghost on the next day): { start, end } in hours since midnight, for a narrow
+// screen's timelines. One window for the week, so its days line up; the full day when empty.
+export function weekHourWindow(days, nowMs = Date.now()) {
+    let startHours = 24;
+    let endHours = 0;
+    for (const day of days) {
+        for (const card of day.drawn) {
+            const startMs = cardStartMs(card);
+            if (startMs < day.dayStartMs) continue;
+            const endMs = cardEndMs(card, nowMs);
+            startHours = Math.min(startHours, hoursIntoDay(startMs));
+            endHours = Math.max(endHours, endMs >= day.dayEndMs ? 24 : hoursIntoDay(endMs));
+        }
+    }
+    if (startHours >= endHours) return FULL_DAY_HOURS;
+    return { start: Math.floor(startHours), end: Math.ceil(endHours) };
+}
+
 // ── Dragging an edge ────────────────────────────────────────────────────────
 // target: { breakIndex: null } for the card itself, or the index of one of its breaks.
 // edge: 'start' or 'end'. A running card or an ongoing break has no end to drag.

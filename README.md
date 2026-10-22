@@ -14,7 +14,8 @@ uses Shifts.
 
 ## The road ahead
 
-- On a phone the layout fits (timelines the screen's width, cards wrapping), but adding a
+- On a phone the layout fits (timelines the screen's width, spanning only the whole hours that
+  hold the week's cards, the same on every day; cards wrapping), but adding a
   break or a card needs Ctrl+click, which a touch screen has no way to give.
 
 

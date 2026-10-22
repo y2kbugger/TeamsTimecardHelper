@@ -5,7 +5,7 @@ import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
     snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
-    getWorkSegments, isLongCard, proposeCard, buildNewTimeCardBody, buildDailyActuals, buildWeeklyModel,
+    getWorkSegments, isLongCard, proposeCard, buildNewTimeCardBody, weekHourWindow, buildDailyActuals, buildWeeklyModel,
     dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
 } from '../core.js';
 
@@ -102,6 +102,19 @@ test('week days: a card past midnight is drawn on both days and its time split b
         parseLocalDate('2026-10-18'), local('2026-10-20T12:00').getTime());
     assert.deepEqual(days.map(d => [day(d.dayStart), d.listed.length, d.drawn.length, d.workedMs / 3600e3]),
         [['2026-10-20', 0, 1, 1], ['2026-10-19', 1, 1, 2], ['2026-10-18', 0, 0, 0]]);
+});
+
+test('hour window: whole hours around the week\'s cards on their own days', () => {
+    const week = (cards, now) => weekHourWindow(buildWeekDays(cards, parseLocalDate('2026-10-18'), local(now).getTime()), local(now).getTime());
+    assert.deepEqual(week([
+        card({ clockIn: '2026-10-19T09:07', clockOut: '2026-10-19T12:30' }),
+        card({ clockIn: '2026-10-20T08:55', clockOut: '2026-10-20T16:01' }),
+    ], '2026-10-21T18:00'), { start: 8, end: 17 });
+    assert.deepEqual(week([card({ clockIn: '2026-10-19T09:00', clockOut: '2026-10-19T12:00' })], '2026-10-21T18:00'), { start: 9, end: 12 }, 'round hours stay');
+    assert.deepEqual(week([card({ clockIn: '2026-10-19T09:00', clockOut: '2026-10-20T01:00' })], '2026-10-21T18:00'), { start: 9, end: 24 },
+        'past midnight reaches the end of its own day; the next day\'s ghost does not pull the start to 0');
+    assert.deepEqual(week([card({ clockIn: '2026-10-21T13:10' })], '2026-10-21T15:20'), { start: 13, end: 16 }, 'a running card to now');
+    assert.deepEqual(week([], '2026-10-21T18:00'), { start: 0, end: 24 }, 'the full day when empty');
 });
 
 test('new card: 30 minutes centred and snapped, between cards, never past now', () => {
