@@ -123,7 +123,8 @@ async function waitFor(describe, predicate) {
 }
 
 // A fresh app on freshly seeded mock data, showing this week (or `week`), its first render done.
-async function openApp({ week = null, beforeLoad = async () => { } } = {}) {
+// team: false opens it as on a first visit, with no team chosen yet.
+async function openApp({ week = null, team = true, beforeLoad = async () => { } } = {}) {
     seedMockDb();
     sessionStorage.removeItem(auth.MOCK_EXPIRED_KEY);
     sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
@@ -133,7 +134,8 @@ async function openApp({ week = null, beforeLoad = async () => { } } = {}) {
         sessionStorage.setItem(STORAGE_KEYS.selectedWeek, formatDateInputValue(week));
         sessionStorage.setItem(STORAGE_KEYS.lastActivity, String(Date.now()));
     }
-    localStorage.setItem(STORAGE_KEYS.selectedTeamId, MOCK_TEAM.id);
+    if (team) localStorage.setItem(STORAGE_KEYS.selectedTeamId, MOCK_TEAM.id);
+    else localStorage.removeItem(STORAGE_KEYS.selectedTeamId);
     await beforeLoad();
     const frame = document.createElement('iframe');
     frame.className = 'test-app-frame';
@@ -141,7 +143,8 @@ async function openApp({ week = null, beforeLoad = async () => { } } = {}) {
     document.body.appendChild(frame);
     await new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
     const app = new AppDriver(frame);
-    await app.settled('the first render');
+    if (team) await app.settled('the first render');
+    else await waitFor('the team dialog', () => app.$('#team-modal') && !app.$('#team-modal').hidden);
     return app;
 }
 
@@ -487,6 +490,27 @@ const mockTests = [
             check(selected() === 0, 'leaving the tab lets go');
             return {};
         }, { week: lastWeek() }),
+    },
+    {
+        name: 'the-team-is-chosen-once-in-a-dialog',
+        run: () => withApp(async app => {
+            const dialog = app.$('#team-modal');
+            const escape = () => app.doc.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            check(app.$('#btn-team-cancel').hidden, 'no Cancel on a first visit');
+            escape();
+            check(!dialog.hidden, 'Escape does not dismiss it without a team');
+            app.$('#team-picker-select').value = MOCK_TEAM.id;
+            app.click('#btn-team-save');
+            await app.settled('the team\'s week');
+            check(dialog.hidden, 'closed once chosen');
+            check(app.$('#toolbar-title').textContent === MOCK_TEAM.displayName, `the toolbar names it: ${app.$('#toolbar-title').textContent}`);
+            check(localStorage.getItem(STORAGE_KEYS.selectedTeamId) === MOCK_TEAM.id, 'saved');
+            app.click('#btn-team');
+            check(!dialog.hidden && !app.$('#btn-team-cancel').hidden, 'the name opens it again, now with Cancel');
+            escape();
+            check(dialog.hidden, 'and Escape closes it');
+            return {};
+        }, { team: false }),
     },
     {
         name: 'an-empty-past-day-has-a-timeline',

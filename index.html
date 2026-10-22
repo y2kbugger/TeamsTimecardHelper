@@ -13,42 +13,43 @@
 </head>
 
 <body data-page="app">
-  <header>
-    <h1>Teams Timecards</h1>
-    <div id="header-actions"></div>
-    <span id="user-info"></span>
-    <button class="btn btn-secondary" id="btn-change-team" hidden>Change Team</button>
-    <button class="btn btn-secondary" id="btn-signout" title="Signs out of this app only" hidden>Sign Out</button>
+  <!-- One toolbar: the team and the week on the left, the week's total in the middle, clocking
+       in and the account on the right. -->
+  <header id="toolbar">
+    <div id="toolbar-start">
+      <button class="btn btn-quiet team-button" id="btn-team" title="Change team" disabled>
+        <span id="toolbar-title">Loading…</span>
+      </button>
+      <div id="week-nav" hidden>
+        <button class="btn btn-secondary btn-icon" id="btn-week-prev" title="Previous week" aria-label="Previous week">←</button>
+        <div class="week-picker-stack">
+          <input type="date" id="week-picker" aria-label="Week" />
+          <span id="week-range-label"></span>
+        </div>
+        <button class="btn btn-secondary btn-icon" id="btn-week-next" title="Next week" aria-label="Next week">→</button>
+      </div>
+    </div>
+    <div id="toolbar-center">
+      <span class="spinner" id="busy" title="Talking to Microsoft" hidden></span>
+      <span id="week-total" title="Worked this week" hidden></span>
+    </div>
+    <div id="toolbar-end">
+      <button class="btn btn-success" id="btn-clock" hidden>Clock In</button>
+      <div id="header-actions"></div>
+      <span id="user-info"></span>
+      <button class="btn btn-quiet btn-icon" id="btn-signout" title="Sign out (of this app only)" aria-label="Sign out" hidden>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" />
+        </svg>
+      </button>
+    </div>
   </header>
 
   <div id="error-banner"></div>
   <div id="drag-tooltip" hidden></div>
 
   <main id="app" hidden>
-    <div id="toolbar">
-      <span id="toolbar-title">Loading…</span>
-      <div id="week-nav" hidden>
-        <button class="btn btn-secondary btn-icon" id="btn-week-prev" title="Previous week" aria-label="Previous week">←</button>
-        <input type="date" id="week-picker" aria-label="Week" />
-        <button class="btn btn-secondary btn-icon" id="btn-week-next" title="Next week" aria-label="Next week">→</button>
-        <span id="week-range-label"></span>
-      </div>
-      <div id="toolbar-end">
-        <span class="spinner" id="busy" title="Talking to Microsoft" hidden></span>
-        <span id="week-total" title="Worked this week" hidden></span>
-        <button class="btn btn-success" id="btn-clock" hidden>Clock In</button>
-      </div>
-    </div>
-
-    <div id="team-picker-panel" class="panel-empty" hidden>
-      <div class="team-picker-card">
-        <p id="team-picker-msg"></p>
-        <div class="team-picker-row">
-          <select id="team-picker-select" aria-label="Team"></select>
-          <button class="btn btn-primary" id="btn-team-save">Use Team</button>
-        </div>
-      </div>
-    </div>
     <div id="status-panel" class="panel-empty" hidden></div>
     <div id="timecards-loading" class="panel-empty" hidden><span class="spinner"></span>Loading timecards…</div>
     <div id="weeks" hidden></div>
@@ -71,6 +72,20 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" id="btn-edit-cancel">Cancel</button>
         <button class="btn btn-primary" id="btn-edit-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chosen once, so a dialog rather than a page: it opens by itself when no team is chosen yet,
+       and then cannot be dismissed without choosing. -->
+  <div class="modal-overlay" id="team-modal" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="team-title">
+      <h2 id="team-title">Team</h2>
+      <p id="team-picker-msg"></p>
+      <select id="team-picker-select" aria-label="Team"></select>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="btn-team-cancel">Cancel</button>
+        <button class="btn btn-primary" id="btn-team-save">Use Team</button>
       </div>
     </div>
   </div>

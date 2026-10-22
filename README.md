@@ -49,6 +49,8 @@ uses Shifts.
 
 ### Behaviour worth knowing
 
+- The team is chosen once, in a dialog that opens by itself when none is saved in this browser
+  (one team is chosen without asking); the team's name in the toolbar opens it again.
 - Weeks run Sunday to Saturday. The chosen week holds while the user is active; after an hour
   without a click or key (a new sign-in, a tab left open over the weekend) the app returns to the
   current week, so Monday morning opens on the new week.

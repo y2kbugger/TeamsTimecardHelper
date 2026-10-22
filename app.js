@@ -51,9 +51,9 @@ const state = {
 };
 
 const el = Object.fromEntries([
-    'app', 'user-info', 'btn-signout', 'btn-change-team', 'toolbar-title', 'busy', 'week-nav',
+    'app', 'user-info', 'btn-signout', 'btn-team', 'toolbar-title', 'busy', 'week-nav',
     'btn-week-prev', 'btn-week-next', 'week-picker', 'week-range-label', 'week-total', 'btn-clock',
-    'team-picker-panel', 'team-picker-msg', 'team-picker-select', 'btn-team-save', 'status-panel',
+    'team-modal', 'team-picker-msg', 'team-picker-select', 'btn-team-save', 'btn-team-cancel', 'status-panel',
     'timecards-loading', 'weeks', 'drag-tooltip', 'edit-modal', 'edit-clock-in', 'edit-clock-out',
     'edit-notes', 'breaks-edit', 'btn-edit-save', 'btn-edit-cancel', 'confirm-modal',
     'confirm-title', 'confirm-msg', 'confirm-beta-warn', 'btn-confirm-ok', 'btn-confirm-cancel',
@@ -87,10 +87,13 @@ function bindEvents() {
         sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
         void auth.signOut();
     });
-    el.btnChangeTeam.addEventListener('click', () => showTeamPicker('Choose a different team. Your choice is saved in this browser.'));
+    el.btnTeam.addEventListener('click', () => openTeamDialog('Your choice is saved in this browser.'));
+    el.btnTeamCancel.addEventListener('click', closeTeamDialog);
     el.btnTeamSave.addEventListener('click', () => {
         const team = state.teams.find(t => t.id === el.teamPickerSelect.value);
-        if (team) void selectTeam(team);
+        if (!team) return;
+        show(el.teamModal, false);
+        if (team.id !== state.team?.id) void selectTeam(team);
     });
     el.btnWeekPrev.addEventListener('click', () => selectWeek(addDays(state.weekStart, -7)));
     el.btnWeekNext.addEventListener('click', () => selectWeek(addDays(state.weekStart, 7)));
@@ -107,6 +110,7 @@ function bindEvents() {
         if (event.key !== 'Escape') return;
         if (!el.confirmModal.hidden) closeConfirm(false);
         else if (!el.editModal.hidden) closeEditDialog();
+        else if (!el.teamModal.hidden) closeTeamDialog();
         else highlightCard(null);
     });
     // A click away from every card lets go of the selected one; one in a dialog is about it.
@@ -235,8 +239,10 @@ async function loadTeams() {
     if (saved) return selectTeam(saved);
     if (state.teams.length === 1) return selectTeam(state.teams[0]);
     if (!state.teams.length) return showStatus('You are not in any team.');
-    showTeamPicker(savedId
-        ? 'Your saved team is no longer available. Choose another.'
+    el.toolbarTitle.textContent = 'Choose a team';
+    showStatus('Choose a team to see its timecards.');
+    openTeamDialog(savedId
+        ? 'Your saved team is no longer available. Choose another; it is saved in this browser.'
         : 'Choose the team to use for timecards. Your choice is saved in this browser.');
 }
 
@@ -246,26 +252,32 @@ function showStatus(html, isError = false) {
     showOnly(el.statusPanel);
 }
 
-// The content area shows one of: the status panel, the team picker, the loading line, the weeks.
+// The content area shows one of: the status panel, the loading line, the weeks.
 function showOnly(panel) {
-    for (const each of [el.statusPanel, el.teamPickerPanel, el.timecardsLoading, el.weeks]) show(each, each === panel);
+    for (const each of [el.statusPanel, el.timecardsLoading, el.weeks]) show(each, each === panel);
     const weekShown = panel === el.weeks || panel === el.timecardsLoading;
     show(el.weekNav, weekShown);
     show(el.weekTotal, weekShown);
     // Clock In only while no card is open; an open card has its own Clock Out.
     show(el.btnClock, weekShown && !state.activeCard);
-    show(el.btnChangeTeam, weekShown && state.teams.length > 1);
+    // The team's name is the button that changes it, when there is another to change to.
+    el.btnTeam.disabled = state.teams.length < 2;
     weeklyAverage?.setWeeklyAverageTriggerVisible(Boolean(state.team) && weekShown);
 }
 
-function showTeamPicker(message) {
-    state.team = null;
-    el.toolbarTitle.textContent = 'Choose a team';
+// With no team chosen yet it cannot be dismissed: there is nothing to show without one.
+function openTeamDialog(message) {
     el.teamPickerMsg.textContent = message;
     el.teamPickerSelect.innerHTML = state.teams
         .map(team => `<option value="${escHtml(team.id)}">${escHtml(team.displayName)}</option>`).join('');
-    el.teamPickerSelect.value = localStorage.getItem(STORAGE_KEYS.selectedTeamId) || state.teams[0]?.id || '';
-    showOnly(el.teamPickerPanel);
+    el.teamPickerSelect.value = state.team?.id || state.teams[0]?.id || '';
+    show(el.btnTeamCancel, Boolean(state.team));
+    show(el.teamModal, true);
+    el.teamPickerSelect.focus();
+}
+
+function closeTeamDialog() {
+    if (state.team) show(el.teamModal, false);
 }
 
 async function selectTeam(team) {
@@ -437,7 +449,7 @@ function renderCard(card, isLatest, nowMs) {
             <span class="card-actions">
                 ${canExtend ? '<button class="btn btn-secondary btn-compact" data-action="extend">Extend to now</button>' : ''}
                 <button class="btn btn-secondary btn-compact" data-action="edit">Edit</button>
-                <button class="btn btn-quiet btn-compact btn-icon" data-action="delete" title="Delete timecard" aria-label="Delete timecard">🗑</button>
+                <button class="btn btn-quiet btn-compact btn-icon" data-action="delete" title="Delete timecard" aria-label="Delete timecard">✕</button>
             </span>
         </div>`;
     const breakAction = isActive ? { clockedIn: 'startBreak', onBreak: 'endBreak' }[card.state] : null;
@@ -459,7 +471,7 @@ function renderBreaks(card, breakAction) {
             <span class="break-times">${timeFormat.format(startMs)} → ${b.end ? timeFormat.format(new Date(b.end.dateTime)) : 'now'}</span>
             <span class="break-length">${b.end ? `${Math.round((new Date(b.end.dateTime) - startMs) / 60000)} min` : ''}</span>
             ${!b.end && breakAction === 'endBreak' ? '<button class="btn btn-success btn-compact" data-action="endBreak">End Break</button>' : ''}
-            <button class="btn btn-quiet btn-compact btn-icon" data-action="delete-break" title="Delete break" aria-label="Delete break">🗑</button>`;
+            <button class="btn btn-quiet btn-compact btn-icon" data-action="delete-break" title="Delete break" aria-label="Delete break">✕</button>`;
         list.appendChild(row);
     });
     if (breakAction === 'startBreak') {

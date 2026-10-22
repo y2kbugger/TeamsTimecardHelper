@@ -7,6 +7,8 @@
 const MODE_KEY = 'tc_mock';
 const DB_KEY = 'tc_mock_db';
 export const MOCK_TEAM = { id: 'mock-team', displayName: 'Mock Team', description: '' };
+// A second team, with no timecards, so there is a team to choose.
+const MOCK_OTHER_TEAM = { id: 'mock-team-other', displayName: 'Other Mock Team', description: '' };
 export const MOCK_ACCOUNT = { name: 'Mock User', username: 'mock@localhost', homeAccountId: 'mock', localAccountId: 'mock-user' };
 
 const modeParam = new URLSearchParams(location.search).get('mock');
@@ -91,7 +93,8 @@ export async function mockGraphFetch(url, options = {}) {
     const nowEvent = () => ({ dateTime: now, atApprovedLocation: Boolean(body?.atApprovedLocation), notes: body?.notes || null });
     await Promise.resolve(); // answer later, as a network does, but on no timer
 
-    if (method === 'GET' && path === '/me/joinedTeams') return { value: [MOCK_TEAM] };
+    if (method === 'GET' && path === '/me/joinedTeams') return { value: [MOCK_TEAM, MOCK_OTHER_TEAM] };
+    if (method === 'GET' && path === `/teams/${MOCK_OTHER_TEAM.id}/schedule/timeCards`) return { value: [] };
 
     const match = /^\/teams\/([^/]+)\/schedule\/timeCards(?:\/([^/]+))?(?:\/([^/]+))?$/.exec(path);
     if (!match || match[1] !== MOCK_TEAM.id) throw graphError(404, `Mock Graph has no route for ${method} ${path}`, 'NotFound');
