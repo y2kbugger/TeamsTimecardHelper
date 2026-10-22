@@ -51,7 +51,7 @@ const state = {
 };
 
 const el = Object.fromEntries([
-    'app', 'user-info', 'btn-signout', 'btn-team', 'toolbar-title', 'busy', 'week-nav',
+    'app', 'user-info', 'btn-signout', 'btn-team', 'toolbar-title', 'busy', 'status-card',
     'btn-week-prev', 'btn-week-next', 'week-picker', 'week-range-label', 'week-total', 'btn-clock',
     'team-modal', 'team-picker-msg', 'team-picker-select', 'btn-team-save', 'btn-team-cancel', 'status-panel',
     'timecards-loading', 'weeks', 'drag-tooltip', 'edit-modal', 'edit-clock-in', 'edit-clock-out',
@@ -256,8 +256,7 @@ function showStatus(html, isError = false) {
 function showOnly(panel) {
     for (const each of [el.statusPanel, el.timecardsLoading, el.weeks]) show(each, each === panel);
     const weekShown = panel === el.weeks || panel === el.timecardsLoading;
-    show(el.weekNav, weekShown);
-    show(el.weekTotal, weekShown);
+    show(el.statusCard, weekShown);
     // Clock In only while no card is open; an open card has its own Clock Out.
     show(el.btnClock, weekShown && !state.activeCard);
     // The team's name is the button that changes it, when there is another to change to.

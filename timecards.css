@@ -1,13 +1,14 @@
 /* ── Layout and toolbar ─────────────────────────────────────────────────── */
 
 #app { flex: 1; display: flex; flex-direction: column }
-/* The one toolbar: three columns, the middle one (the week's total) centred on the page. */
+/* The one toolbar: three columns, the middle one (the status card) centred on the page. */
 #toolbar {
   position: sticky;
   top: 0;
   z-index: 50;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
+  grid-template-areas: "start status end";
   align-items: center;
   gap: 12px;
   min-height: 52px;
@@ -16,14 +17,30 @@
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(6px);
 }
-#toolbar-start, #week-nav, #toolbar-end { display: flex; align-items: center; gap: 8px }
-#toolbar-start { gap: 18px }
-#toolbar-end { justify-self: end }
-#toolbar-center { position: relative; display: flex; align-items: center }
-/* Beside the total without moving it. */
-#busy { position: absolute; right: calc(100% + 4px) }
+#toolbar-start { grid-area: start; min-width: 0 }
+#toolbar-end { grid-area: end; justify-self: end }
+#week-nav, #toolbar-end, .status-total { display: flex; align-items: center; gap: 8px }
+/* The week, its total and the weekly average, in one card. */
+#status-card {
+  grid-area: status;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 5px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.status-total { flex-direction: column; gap: 2px; padding-left: 14px; border-left: 1px solid var(--border) }
+.weekly-avg-trigger { padding: 0 6px; font-size: .68rem }
+.weekly-avg-trigger:hover:not(:disabled) { background: var(--accent-soft); color: var(--text) }
+/* Small in the card's corner, so showing it moves nothing. */
+#busy { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; margin: 0; border-width: 2px }
 /* The team's name, and the way to change it: a pencil shows it can be. */
-.team-button { padding: 4px 8px; color: var(--text); font-weight: 600 }
+.team-button { max-width: 100%; padding: 4px 8px; color: var(--text); font-weight: 600 }
+#toolbar-title { overflow: hidden; text-overflow: ellipsis }
 .team-button::before { content: "⏱"; margin-right: 2px }
 .team-button:not(:disabled)::after { content: "✎"; color: var(--text2); font-weight: 400 }
 .team-button:hover:not(:disabled) { background: var(--surface2); color: var(--text) }
@@ -33,7 +50,7 @@
 #week-picker { padding: 0 6px; font-size: .78rem; line-height: 1.5 }
 #week-range-label { color: var(--text2); font-size: .66rem; white-space: nowrap }
 #week-total {
-  padding: 5px 12px;
+  padding: 3px 12px;
   background: #1d4a2e;
   color: #d9ffe9;
   border-radius: 999px;
@@ -236,3 +253,32 @@ body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .weekly-avg-row-detail td { padding-block: 5px; background: rgba(106, 86, 255, .12); font-size: .75rem }
 .weekly-avg-row-detail-first td { border-top-width: 6px; border-top-color: transparent; background-clip: padding-box }
 .weekly-avg-row-detail-off td { color: rgba(232, 234, 246, .55) }
+
+/* ── A narrow screen (a phone) ─────────────────────────────────────────── */
+/* The toolbar takes two rows, the status card the second; timelines fit the screen instead of
+   scrolling, labelled every sixth hour; cards use the width and wrap. */
+
+@media (max-width: 760px) {
+  #toolbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "start end" "status status"; gap: 6px 8px; padding: 6px 12px }
+  #status-card { justify-self: stretch }
+  #user-info { display: none }
+  #btn-clock { min-width: 0 }
+  .day { padding: 12px 12px 8px }
+  .timeline { min-width: 0 }
+  .hour-minor { display: none }
+  .card-list { max-width: none }
+  .card-row { flex-wrap: wrap; row-gap: 4px }
+  .card-actions { margin-left: auto }
+  .break-times { min-width: 0 }
+  .form-row { grid-template-columns: 1fr }
+}
+
+/* ── A touch screen ────────────────────────────────────────────────────── */
+/* Nothing to hover, so nothing waits to be pointed at; a finger needs a wider handle. */
+
+@media (hover: none) {
+  .card-actions, .break-row [data-action="delete-break"], .day.is-past { opacity: 1 }
+}
+@media (pointer: coarse) {
+  .resize-handle::before { inset: 0 -12px }
+}

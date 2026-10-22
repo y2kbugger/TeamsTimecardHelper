@@ -37,7 +37,7 @@ body > header {
 }
 body > header h1 { flex: 1; font-size: 1rem; letter-spacing: .02em }
 body > header h1::before { content: "⏱"; margin-right: 8px }
-#header-actions, #test-actions, .modal-actions, .modal-subheader { display: flex; align-items: center; gap: 8px }
+#test-actions, .modal-actions, .modal-subheader { display: flex; align-items: center; gap: 8px }
 #user-info, #test-auth-status { max-width: 26ch; overflow: hidden; color: var(--text2); text-overflow: ellipsis; white-space: nowrap }
 
 .btn, input, textarea, select { font: inherit; color: inherit }

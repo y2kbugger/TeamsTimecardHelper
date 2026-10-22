@@ -14,7 +14,8 @@ uses Shifts.
 
 ## The road ahead
 
-- Desktop only: phones are not a target.
+- On a phone the layout fits (a two-row toolbar, timelines the screen's width), but adding a
+  break or a card needs Ctrl+click, which a touch screen has no way to give.
 
 
 ## Working on it

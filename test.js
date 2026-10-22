@@ -123,8 +123,8 @@ async function waitFor(describe, predicate) {
 }
 
 // A fresh app on freshly seeded mock data, showing this week (or `week`), its first render done.
-// team: false opens it as on a first visit, with no team chosen yet.
-async function openApp({ week = null, team = true, beforeLoad = async () => { } } = {}) {
+// team: false opens it as on a first visit, with no team chosen yet; width (px) as on that screen.
+async function openApp({ week = null, team = true, width = null, beforeLoad = async () => { } } = {}) {
     seedMockDb();
     sessionStorage.removeItem(auth.MOCK_EXPIRED_KEY);
     sessionStorage.removeItem(STORAGE_KEYS.joinedTeams);
@@ -139,6 +139,7 @@ async function openApp({ week = null, team = true, beforeLoad = async () => { } 
     await beforeLoad();
     const frame = document.createElement('iframe');
     frame.className = 'test-app-frame';
+    if (width) frame.style.width = `${width}px`;
     frame.src = 'index.html';
     document.body.appendChild(frame);
     await new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
@@ -511,6 +512,33 @@ const mockTests = [
             check(dialog.hidden, 'and Escape closes it');
             return {};
         }, { team: false }),
+    },
+    {
+        name: 'the-status-card-holds-the-week-total-and-weekly-average',
+        run: () => withApp(async app => {
+            const card = app.$('#status-card');
+            check(card && !card.hidden, 'a status card');
+            check(card.contains(app.$('#week-picker')) && card.contains(app.$('#week-total')), 'the week and its total in it');
+            const average = card.querySelector('.weekly-avg-trigger');
+            check(average && !average.hidden, 'the weekly average linked from it');
+            const toolbar = app.$('#toolbar').getBoundingClientRect();
+            const middle = card.getBoundingClientRect().left + card.getBoundingClientRect().width / 2;
+            check(Math.abs(middle - (toolbar.left + toolbar.width / 2)) < 2, 'centred in the toolbar');
+            return {};
+        }),
+    },
+    {
+        name: 'a-phone-width-has-no-sideways-scroll',
+        run: () => withApp(async app => {
+            const root = app.doc.documentElement;
+            check(root.scrollWidth <= root.clientWidth, `the page fits 390px: ${root.scrollWidth} wide`);
+            const toolbar = app.$('#toolbar').getBoundingClientRect();
+            check(app.$('#status-card').getBoundingClientRect().top > app.$('#btn-team').getBoundingClientRect().bottom - 1, 'the status card on a row of its own');
+            check(toolbar.height < 130, `the toolbar stays two rows: ${toolbar.height}px`);
+            const timeline = app.$('.timeline').getBoundingClientRect();
+            check(timeline.right <= root.clientWidth, 'a timeline fits the screen');
+            return {};
+        }, { width: 390 }),
     },
     {
         name: 'an-empty-past-day-has-a-timeline',

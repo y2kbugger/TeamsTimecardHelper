@@ -68,7 +68,8 @@ export function renderTimeline(day, nowMs) {
         const at = new Date(day.dayStartMs);
         at.setHours(hour);
         const label = document.createElement('div');
-        label.className = 'hour-label';
+        // A narrow screen labels every sixth hour only.
+        label.className = hour % 6 ? 'hour-label hour-minor' : 'hour-label';
         label.style.left = `${percentOfDay(day, at.getTime())}%`;
         label.textContent = hourFormat.format(at);
         axis.appendChild(label);

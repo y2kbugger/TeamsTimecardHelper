@@ -66,12 +66,13 @@ export function setWeeklyAverageTriggerVisible(visible) {
 function buildFeatureUi() {
     triggerButton = document.createElement('button');
     triggerButton.type = 'button';
-    triggerButton.className = 'btn btn-secondary weekly-avg-trigger';
-    triggerButton.textContent = 'Weekly Average';
+    triggerButton.className = 'btn btn-quiet btn-compact weekly-avg-trigger';
+    triggerButton.textContent = 'Weekly average ›';
     triggerButton.setAttribute('aria-haspopup', 'dialog');
     triggerButton.setAttribute('aria-expanded', 'false');
     triggerButton.hidden = true;
-    document.querySelector('#header-actions').appendChild(triggerButton);
+    // A link under the week's total in the toolbar's status card.
+    document.querySelector('#status-links').appendChild(triggerButton);
 
     modalOverlay = document.createElement('div');
     modalOverlay.className = 'modal-overlay';
