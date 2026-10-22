@@ -26,8 +26,6 @@
   font: 600 .85rem/1.2 var(--mono);
 }
 #btn-clock { min-width: 108px }
-.btn-on-break { background: #4a3a10; color: #ffdca8; box-shadow: inset 0 0 0 1px rgba(240, 168, 67, .45) }
-.btn-on-break:disabled { opacity: 1 }
 #drag-tooltip {
   position: fixed;
   top: 0;

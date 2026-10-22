@@ -156,7 +156,10 @@ class AppDriver {
 
     $$(selector) { return [...this.doc.querySelectorAll(selector)]; }
 
-    clockLabel() { return this.doc.getElementById('btn-clock').textContent; }
+    // The toolbar has Clock In while no card is open; the open card has Clock Out.
+    clockInShown() { return !this.$('#btn-clock').hidden; }
+
+    clockOutButton() { return this.$('.card [data-action="clockOut"]'); }
 
     weekLabel() { return this.doc.getElementById('week-range-label').textContent; }
 
@@ -228,27 +231,28 @@ const mockTests = [
     {
         name: 'clock-in-break-clock-out',
         run: () => withApp(async app => {
-            check(app.clockLabel() === 'Clock In', `starts clocked out, not ${app.clockLabel()}`);
+            check(app.clockInShown() && !app.clockOutButton(), 'starts clocked out');
             app.click('#btn-clock');
-            await waitFor('Clock Out', () => app.clockLabel() === 'Clock Out');
+            await waitFor('Clock Out on the open card, no Clock In', () => app.clockOutButton() && !app.clockInShown());
             check(openMockCard()?.state === 'clockedIn', 'the backend has an open card');
             app.click(await waitFor('Start Break', () => app.$('[data-action="startBreak"]')));
-            await waitFor('On Break', () => app.clockLabel() === 'On Break');
-            check(app.$('#btn-clock').disabled, 'no clocking out on a break');
-            app.click(await waitFor('End Break', () => app.$('[data-action="endBreak"]')));
-            await waitFor('Clock Out again', () => app.clockLabel() === 'Clock Out');
-            app.click('#btn-clock');
-            await waitFor('Clock In again', () => app.clockLabel() === 'Clock In');
+            await waitFor('End Break', () => app.$('[data-action="endBreak"]'));
+            check(app.clockOutButton().disabled, 'no clocking out on a break');
+            app.click('[data-action="endBreak"]');
+            await waitFor('Clock Out again', () => app.clockOutButton() && !app.clockOutButton().disabled);
+            app.click(app.clockOutButton());
+            await waitFor('Clock In again', () => app.clockInShown() && !app.clockOutButton());
             const card = mockCards().at(-1);
             check(card.state === 'clockedOut' && card.breaks.length === 1 && card.breaks[0].end, `ends clocked out with one closed break: ${JSON.stringify(card)}`);
             return {};
         }),
     },
     {
-        name: 'past-week-still-shows-the-open-card',
+        name: 'past-week-knows-a-card-is-open',
         // The app starts on last week (a reload while there), so it never saw this week's card.
         run: () => withApp(async app => {
-            await waitFor('Clock Out on a past week', () => app.clockLabel() === 'Clock Out');
+            await app.settled('both weeks read');
+            check(!app.clockInShown(), 'no Clock In on a past week while a card is open');
             return {};
         }, { week: lastWeek(), beforeLoad: () => mockGraphFetch(`/teams/${MOCK_TEAM.id}/schedule/timeCards/clockIn`, { method: 'POST', body: '{}' }) }),
     },
@@ -257,7 +261,7 @@ const mockTests = [
         run: () => withApp(async app => {
             const cards = app.$$('.card').length;
             app.click('#btn-clock');
-            await waitFor('Clock Out', () => app.clockLabel() === 'Clock Out');
+            await waitFor('clocked in', () => openMockCard() && !app.clockInShown());
             await app.settled('the reload');
             check(app.$$('.card').length === cards, 'the past week still shows its own cards');
             return { cards };
@@ -577,7 +581,7 @@ const mockTests = [
             check(app.$('#btn-clock').disabled, 'the clicked button waits');
             check(app.doc.body.classList.contains('session-expired'), 'the shown data is marked stale');
             app.click('#session-bar button');
-            await waitFor('Clock Out after signing in', () => app.clockLabel() === 'Clock Out');
+            await waitFor('clocked in after signing in', () => app.clockOutButton() && !app.clockInShown());
             check(!app.$('#session-bar') && !app.doc.body.classList.contains('session-expired'), 'the bar and the mark are gone');
             return {};
         }),

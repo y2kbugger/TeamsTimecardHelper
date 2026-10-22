@@ -98,7 +98,7 @@ function bindEvents() {
         const picked = parseLocalDate(el.weekPicker.value);
         if (picked) selectWeek(picked);
     });
-    el.btnClock.addEventListener('click', () => void clockAction(el.btnClock.dataset.action));
+    el.btnClock.addEventListener('click', () => void clockAction('clockIn'));
     el.btnEditCancel.addEventListener('click', closeEditDialog);
     el.btnEditSave.addEventListener('click', () => void saveEditDialog());
     el.btnConfirmOk.addEventListener('click', () => closeConfirm(true));
@@ -252,7 +252,8 @@ function showOnly(panel) {
     const weekShown = panel === el.weeks || panel === el.timecardsLoading;
     show(el.weekNav, weekShown);
     show(el.weekTotal, weekShown);
-    show(el.btnClock, weekShown);
+    // Clock In only while no card is open; an open card has its own Clock Out.
+    show(el.btnClock, weekShown && !state.activeCard);
     show(el.btnChangeTeam, weekShown && state.teams.length > 1);
     weeklyAverage?.setWeeklyAverageTriggerVisible(Boolean(state.team) && weekShown);
 }
@@ -367,7 +368,7 @@ function render() {
     // Another week's cards are never drawn under this week's dates; its load renders when done.
     if (state.cardsWeekKey !== weekKey(state.weekStart)) return;
     syncWeekControls();
-    renderClockButton();
+    el.btnClock.disabled = false; // disabled again below while a change is on its way
     const nowMs = Date.now();
     state.renderedDayKey = weekKey(getDayStart(nowMs));
     const days = buildWeekDays(state.cards, state.weekStart, nowMs);
@@ -395,18 +396,6 @@ function renderTotals(days) {
     });
 }
 
-function renderClockButton() {
-    const stateName = state.activeCard?.state || 'clockedOut';
-    const look = {
-        clockedOut: ['Clock In', 'btn btn-success', 'clockIn', false],
-        clockedIn: ['Clock Out', 'btn btn-danger', 'clockOut', false],
-        onBreak: ['On Break', 'btn btn-on-break', '', true],
-    }[stateName];
-    assert(look, `a look for ${stateName}`);
-    [el.btnClock.textContent, el.btnClock.className, el.btnClock.dataset.action, el.btnClock.disabled] = look;
-    el.btnClock.title = stateName === 'onBreak' ? 'End the break before clocking out' : '';
-}
-
 function renderDay(day, nowMs, latestId) {
     const section = document.createElement('section');
     section.className = 'day';
@@ -431,6 +420,8 @@ function renderCard(card, isLatest, nowMs) {
     item.dataset.cardId = card.id;
     const isLong = isLongCard(card, nowMs);
     item.classList.toggle('is-long', isLong);
+    // The open card carries what is done to it: Clock Out here, and its break below.
+    const isActive = state.activeCard?.id === card.id;
     const clockOut = card.clockOut ? new Date(card.clockOut.dateTime) : null;
     // Only today's last card: extending an older one to now would add days of time.
     const canExtend = isLatest && clockOut && isSameDay(clockOut, new Date(nowMs)) && !state.activeCard;
@@ -442,13 +433,14 @@ function renderCard(card, isLatest, nowMs) {
             <span class="card-worked" data-worked="${escHtml(card.id)}">${formatDurationHms(workedMs(card, nowMs))}</span>
             ${isLong ? '<span class="card-long" title="Longer than any real shift: check its clock-out">over 16 h</span>' : ''}
             ${card.notes?.content ? `<span class="card-notes" title="${escHtml(card.notes.content)}">${escHtml(card.notes.content)}</span>` : ''}
+            ${isActive ? `<button class="btn btn-danger btn-compact" data-action="clockOut"${card.state === 'onBreak' ? ' disabled title="End the break before clocking out"' : ''}>Clock Out</button>` : ''}
             <span class="card-actions">
                 ${canExtend ? '<button class="btn btn-secondary btn-compact" data-action="extend">Extend to now</button>' : ''}
                 <button class="btn btn-secondary btn-compact" data-action="edit">Edit</button>
                 <button class="btn btn-quiet btn-compact btn-icon" data-action="delete" title="Delete timecard" aria-label="Delete timecard">🗑</button>
             </span>
         </div>`;
-    const breakAction = state.activeCard?.id === card.id ? { clockedIn: 'startBreak', onBreak: 'endBreak' }[card.state] : null;
+    const breakAction = isActive ? { clockedIn: 'startBreak', onBreak: 'endBreak' }[card.state] : null;
     if (card.breaks.length || breakAction) item.appendChild(renderBreaks(card, breakAction));
     return item;
 }
@@ -522,6 +514,7 @@ function onWeeksClick(event) {
         edit: () => openEditDialog(card),
         delete: () => deleteCard(card),
         'delete-break': () => deleteBreak(card, breakIndex),
+        clockOut: () => clockAction('clockOut', button),
         startBreak: () => clockAction('startBreak', button),
         endBreak: () => clockAction('endBreak', button),
     };

@@ -52,7 +52,9 @@ uses Shifts.
 - Weeks run Sunday to Saturday. The chosen week holds while the user is active; after an hour
   without a click or key (a new sign-in, a tab left open over the weekend) the app returns to the
   current week, so Monday morning opens on the new week.
-- The toolbar's clock state comes from the current week whatever week is shown.
+- The toolbar has Clock In while no card is open. The open card carries Clock Out and its break
+  buttons, as a card's own actions; on another week it is not on the page, and Clock In stays
+  hidden there too (whether a card is open comes from the current week, whatever week is shown).
 - A card past midnight is worked on in the day it clocked in: there an edge past midnight has its
   handle at the end of the axis; on the next day it is a faint ghost that takes no clicks.
 - The timeline's language, for cards and breaks alike: a white handle is a set time that drags; a
