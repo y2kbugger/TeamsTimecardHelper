@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     addDays, getWeekStart, getWeekRange, formatDateInputValue, toLocalDatetimeInput, parseLocalDate,
-    snapMs, formatDurationHms, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
+    snapMs, formatDurationHms, formatDurationShort, formatSignedDuration, normalizeCard, deriveCardState, workedMs,
     filterCardsForWeek, findActiveCard, buildWeekDays, buildUpdatedCard, buildTimeCardUpdateBody,
     getWorkSegments, isLongCard, proposeCard, buildNewTimeCardBody, weekHourWindow, buildDailyActuals, buildWeeklyModel,
     dragBounds, applyDrag, readEditForm, proposeBreak, addBreak,
@@ -58,6 +58,10 @@ test('durations', () => {
     assert.equal(formatDurationHms(100 * 3600e3), '100:00:00');
     assert.equal(formatSignedDuration(-60e3), '-00:01:00');
     assert.equal(formatSignedDuration(60e3), '+00:01:00');
+    assert.equal(formatDurationShort(45 * 60e3 + 59e3), '45m');
+    assert.equal(formatDurationShort(3 * 3600e3), '3h');
+    assert.equal(formatDurationShort(3 * 3600e3 + 5 * 60e3), '3h 05m');
+    assert.equal(formatDurationShort(-5), '0m');
     assert.equal(snapMs(local('2026-01-01T10:02:31').getTime()), local('2026-01-01T10:05').getTime());
 });
 

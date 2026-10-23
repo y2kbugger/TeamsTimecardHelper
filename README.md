@@ -64,6 +64,10 @@ uses Shifts.
 - The timeline's language, for cards and breaks alike: a white handle is a set time that drags; a
   sheen flowing toward now is still running. A card over 16 hours is red (most likely a clock-out
   forgotten overnight). Past days and card controls stay dim until pointed at.
+- The timeline's tip is its own, not the browser's title, so it shows at once: a span's times and
+  length, what a Ctrl+click would add, and a handle's time. A handle pointed at or dragged has a
+  marker at the top of the axis, like a tab stop on a ruler, with a guide through the axis while
+  dragged.
 - Breaks and missed cards are added on the timeline, every day of the week up to today having
   one: hovering a card shows a ghost of a ten-minute break fitted into its free time under the
   pointer, hovering free time a ghost of a thirty-minute card (ending by now), and Ctrl+click adds
@@ -85,7 +89,7 @@ uses Shifts.
 | `login.html`, `auth-done.html` | the sign-in page; the empty page popups and silent renewal return to |
 | `ui.js` | DOM helpers, and on localhost the error and report channel to the dev server |
 | `common.css`, `timecards.css` | shared styles; the app's |
-| `favicon.svg` | the icon: the timeline in small (a card with a break, its handles, the now line) |
+| `favicon.svg` | the icon: three days' bars and the now line, bold enough for 16 pixels |
 | `test.html`, `test.js` | browser tests: Graph probes (live) and app flows (with `?mock`) |
 | `mockgraph.js` | an in-memory Graph for local work, on with `?mock` and off with `?mock=0` |
 | `devserver.py`, `serve.sh`, `agent-test.sh` | the dev server and the text-only test run |

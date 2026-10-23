@@ -167,6 +167,12 @@ class AppDriver {
 
     weekLabel() { return this.doc.getElementById('week-range-label').textContent; }
 
+    // The timeline's tip as it reads, '' while it is hidden.
+    tip() {
+        const tip = this.$('.timeline-tip');
+        return tip && !tip.hidden ? tip.textContent : '';
+    }
+
     // Nothing on its way to Graph and the week drawn.
     settled(describe) {
         return waitFor(describe, () => this.$('#busy')?.hidden && !this.$('#weeks')?.hidden);
@@ -343,7 +349,10 @@ const mockTests = [
         run: () => withApp(async app => {
             const { block, card } = seededBlock(app);
             app.grab(block, 'end', 12, 31);
-            check(app.$('#drag-tooltip').textContent.includes('12:30'), `the tooltip shows the snapped time: ${app.$('#drag-tooltip').textContent}`);
+            check(app.tip().includes('12:30') && app.tip().includes('clock out'), `the tip shows the snapped time: ${app.tip()}`);
+            const marker = app.$('.edge-marker.is-dragging');
+            const markerX = marker?.getBoundingClientRect().left;
+            check(marker && Math.abs(markerX - app.xAt(block.parentElement, 12, 30)) < 2, `the marker is over 12:30: ${markerX}`);
             app.pointer('pointerup', block, 0);
             await waitFor('the new clock-out', () => localTime(card().clockOutEvent.dateTime) === '12:30');
             check(localTime(card().clockInEvent.dateTime) === '9:00', 'clock-in unchanged');
@@ -417,10 +426,11 @@ const mockTests = [
             const { block, card } = seededBlock(app);
             app.pointer('pointermove', block, app.xAt(block.parentElement, 11, 22));
             const ghost = app.$('.break-ghost');
-            check(ghost?.title.includes('11:15') && ghost.title.includes('11:25'), `the ghost offers 11:15-11:25: ${ghost?.title}`);
-            check(/Ctrl\+click/.test(ghost.title) && !ghost.classList.contains('is-armed'), `a hint until Ctrl is held: ${ghost.title}`);
+            check(ghost && app.tip().includes('11:15') && app.tip().includes('11:25'), `the ghost offers 11:15-11:25: ${app.tip()}`);
+            check(/Ctrl\+click/.test(app.tip()) && !ghost.classList.contains('is-armed'), `a hint until Ctrl is held: ${app.tip()}`);
             app.win.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }));
-            check(ghost.classList.contains('is-armed') && ghost.title.startsWith('+ break'), `armed with Ctrl: ${ghost.title}`);
+            const armed = app.$('.tip-line[data-tone="break"]')?.textContent ?? '';
+            check(ghost.classList.contains('is-armed') && armed.startsWith('+ break') && !/Ctrl/.test(app.tip()), `armed with Ctrl: ${app.tip()}`);
             block.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, ctrlKey: true }));
             await waitFor('the new break', () => card().breaks.length === 2);
             const added = card().breaks.find(b => localTime(b.start.dateTime) !== '10:30');
@@ -437,7 +447,7 @@ const mockTests = [
             const cards = mockCards().length;
             app.pointer('pointermove', axis, app.xAt(axis, 14, 2));
             const ghost = app.$('.card-ghost');
-            check(ghost?.title.includes('1:45') && ghost.title.includes('2:15'), `a 30-minute card offered, 1:45-2:15: ${ghost?.title}`);
+            check(ghost && /\+ card 1:45.*2:15/.test(app.tip()), `a 30-minute card offered, 1:45-2:15: ${app.tip()}`);
             check(!app.$('.break-ghost'), 'not a break');
             axis.dispatchEvent(new app.win.MouseEvent('click', { bubbles: true, clientX: app.xAt(axis, 14, 2) }));
             await app.settled('anything a plain click set off');
@@ -600,6 +610,49 @@ const mockTests = [
             await app.settled('anything the click set off');
             check(card().breaks.length === 1, 'still one break');
             check(block.classList.contains('is-highlighted') || app.$(`.tc-block.is-highlighted[data-card-id="${block.dataset.cardId}"]`), 'the click selected the card');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'the-tip-tells-a-spans-times-at-once',
+        run: () => withApp(async app => {
+            const { id, block } = seededBlock(app);
+            const axis = block.parentElement;
+            check(!axis.querySelector('[title]'), 'no browser titles on the timeline');
+            app.pointer('pointermove', block, app.xAt(axis, 11, 22));
+            const first = app.$('.tip-line');
+            check(/9:00.*→.*12:00/.test(first.textContent) && first.querySelector('.tip-note')?.textContent === '3h', `the card's times and length: ${app.tip()}`);
+            check(/Ctrl\+click.*\+ break/.test(app.tip()), `and the break a Ctrl+click adds: ${app.tip()}`);
+            const overlay = app.$(`.break-overlay[data-card-id="${id}"]`);
+            app.pointer('pointermove', overlay, app.xAt(axis, 10, 35));
+            check(/Break 10:30.*→.*10:45.*15m/.test(app.tip()), `the break's: ${app.tip()}`);
+            const tip = app.$('.timeline-tip').getBoundingClientRect();
+            check(tip.bottom <= axis.getBoundingClientRect().top, 'above the axis');
+            check(!app.$('.edge-marker'), 'no marker off a handle');
+            app.pointer('pointerleave', app.$('#weeks'), 0);
+            check(app.tip() === '', 'gone when the pointer leaves');
+            return {};
+        }, { week: lastWeek() }),
+    },
+    {
+        name: 'a-handle-pointed-at-has-a-marker',
+        run: () => withApp(async app => {
+            const { block } = seededBlock(app);
+            const axis = block.parentElement;
+            const handle = block.querySelector('.resize-handle[data-edge="end"]');
+            const handleX = handle.getBoundingClientRect().left + handle.getBoundingClientRect().width / 2;
+            app.pointer('pointermove', handle, handleX);
+            const marker = axis.querySelector('.edge-marker');
+            check(marker && !marker.classList.contains('is-dragging'), 'a marker on its axis, no guide yet');
+            check(Math.abs(marker.getBoundingClientRect().left - handleX) < 2, 'over the handle');
+            check(/12:00.*clock out/.test(app.tip()) && !/Ctrl/.test(app.tip()), `the tip names the edge: ${app.tip()}`);
+            app.pointer('pointermove', block, app.xAt(axis, 11, 0));
+            check(!app.$('.edge-marker'), 'gone off the handle');
+            app.grab(block, 'end', 13, 0);
+            check(app.$('.edge-marker.is-dragging'), 'a marker with its guide while dragged');
+            app.win.dispatchEvent(new app.win.KeyboardEvent('keydown', { key: 'Escape' }));
+            check(!app.$('.edge-marker') && app.tip() === '', 'both gone when the drag ends');
+            await app.settled('the redraw');
             return {};
         }, { week: lastWeek() }),
     },

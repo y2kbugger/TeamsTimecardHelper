@@ -55,7 +55,7 @@ const el = Object.fromEntries([
     'app', 'user-info', 'btn-signout', 'btn-team', 'toolbar-title', 'busy', 'status-card',
     'btn-week-prev', 'btn-week-next', 'week-picker', 'week-range-label', 'week-total', 'btn-clock',
     'team-modal', 'team-picker-msg', 'team-picker-select', 'btn-team-save', 'btn-team-cancel', 'status-panel',
-    'timecards-loading', 'weeks', 'drag-tooltip', 'edit-modal', 'edit-clock-in', 'edit-clock-out',
+    'timecards-loading', 'weeks', 'edit-modal', 'edit-clock-in', 'edit-clock-out',
     'edit-notes', 'breaks-edit', 'btn-edit-save', 'btn-edit-cancel', 'confirm-modal',
     'confirm-title', 'confirm-msg', 'confirm-beta-warn', 'btn-confirm-ok', 'btn-confirm-cancel',
 ].map(id => [id.replace(/-(.)/g, (_, c) => c.toUpperCase()), $(id)]));
@@ -142,14 +142,6 @@ function bindEvents() {
             () => auth.graphFetch(timeCardsPath(state.team.id), { method: 'POST', body: JSON.stringify(buildNewTimeCardBody(proposal)) })),
         // A saved drag is drawn by the read-back after the save; drawing now would snap it back.
         onEnd: committed => { if (!committed) render(); },
-        tooltip: {
-            show(x, y, text) {
-                el.dragTooltip.textContent = text;
-                el.dragTooltip.style.transform = `translate(${x + 12}px, ${y - 30}px)`;
-                show(el.dragTooltip, true);
-            },
-            hide: () => show(el.dragTooltip, false),
-        },
     });
 }
 

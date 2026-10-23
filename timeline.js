@@ -4,13 +4,17 @@
 // re-renders, so a background refresh cannot pull the block from under the pointer. Hovering a
 // card shows a faint ghost of the break a Ctrl+click would add there, hovering free time one of a
 // card; holding Ctrl arms it. A plain click only selects, so a click meant to select never adds
-// anything to a real timesheet.
+// anything to a real timesheet. The timeline has its own tip rather than the browser's titles: it
+// shows at once, above the axis, and a handle pointed at or dragged gets a marker above it.
 import {
-    applyDrag, assert, cardEndMs, cardStartMs, dragBounds, FULL_DAY_HOURS, isLongCard, proposeBreak, proposeCard,
+    applyDrag, assert, cardEndMs, cardStartMs, clamp, dragBounds, formatDurationShort, FULL_DAY_HOURS, isLongCard,
+    proposeBreak, proposeCard,
 } from './core.js';
 
 const HOUR_LABEL_EVERY_HOURS = 2;
 const BLOCK_WIDTH_MIN_PERCENT = 0.15;
+const TIP_GAP_PX = 20; // between the tip and the top of its axis, clear of the hour labels
+const TIP_MARGIN_PX = 6; // the least room between the tip and the edge of the window
 
 const hourFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -20,6 +24,11 @@ let drag = null; // the drag in progress, see startDrag
 // offered. Never during a drag, so the click that follows a drag's release finds none and adds
 // nothing.
 let ghost = null;
+// { axis, x, span, edge } under the pointer, for the tip: span is a card's block or a break's
+// overlay, edge a handle of it. Null during a drag, which keeps the tip on the dragged edge.
+let hover = null;
+let tip = null; // the tip's element, made on first use
+let marker = null; // the marker above the handle pointed at or dragged
 
 export function isDragging() {
     return drag !== null;
@@ -39,12 +48,15 @@ function place(element, day, startMs, endMs) {
 
 // A card is worked on in the day it clocked in. On a day it only runs into past midnight it is an
 // untouchable ghost; at home, an edge past midnight gets its handle at the end of the axis.
-function makeSpan(className, day, { cardId, breakIndex, startMs, endMs, card, nowMs, title, overflow }) {
+// endSet: whether its end is a set time; a running span has none and ends at now.
+function makeSpan(className, day, { cardId, breakIndex, startMs, endMs, endSet, card, nowMs, overflow }) {
     const element = document.createElement('div');
     element.className = className;
     element.dataset.cardId = cardId;
     if (breakIndex !== null) element.dataset.breakIndex = String(breakIndex);
-    element.title = title;
+    // Its times, for the tip.
+    element.dataset.startMs = String(startMs);
+    if (endSet) element.dataset.endMs = String(endMs);
     place(element, day, startMs, endMs);
     if (overflow) {
         element.classList.add('is-overflow');
@@ -123,14 +135,10 @@ function appendCard(axis, day, view, card, nowMs) {
     if (endMs <= view.dayStartMs || startMs >= view.dayEndMs) return;
     const overflow = startMs < day.dayStartMs;
     const block = makeSpan('tc-block', view, {
-        cardId: card.id, breakIndex: null, startMs, endMs, card, nowMs, overflow,
-        title: `${timeFormat.format(startMs)} → ${card.clockOut ? timeFormat.format(endMs) : 'now'}`,
+        cardId: card.id, breakIndex: null, startMs, endMs, endSet: Boolean(card.clockOut), card, nowMs, overflow,
     });
     if (!card.clockOut) block.classList.add('is-running');
-    if (isLongCard(card, nowMs)) {
-        block.classList.add('is-long');
-        block.title += ' · over 16 hours: check its clock-out';
-    }
+    if (isLongCard(card, nowMs)) block.classList.add('is-long');
     if (startMs >= day.dayStartMs) {
         const label = document.createElement('span');
         label.className = 'tc-label';
@@ -144,8 +152,8 @@ function appendCard(axis, day, view, card, nowMs) {
         const breakEndMs = b.end ? new Date(b.end.dateTime).getTime() : nowMs;
         if (breakEndMs <= view.dayStartMs || breakStartMs >= view.dayEndMs) return;
         const overlay = makeSpan('break-overlay', view, {
-            cardId: card.id, breakIndex, startMs: breakStartMs, endMs: breakEndMs, card, nowMs, overflow,
-            title: `Break ${timeFormat.format(breakStartMs)} → ${b.end ? timeFormat.format(breakEndMs) : 'now'}`,
+            cardId: card.id, breakIndex, startMs: breakStartMs, endMs: breakEndMs, endSet: Boolean(b.end), card, nowMs,
+            overflow,
         });
         if (!b.end) overlay.classList.add('is-running');
         axis.appendChild(overlay);
@@ -167,13 +175,14 @@ export function updateRunningSpans(root, cardsById, nowMs) {
             : new Date(card.breaks[Number(breakIndex)].start.dateTime).getTime();
         place(element, day, startMs, nowMs);
     });
+    drawHover(); // a running span's length in the tip grows too
 }
 
-// ── Dragging ────────────────────────────────────────────────────────────────
+// ── Pointing at a timeline ──────────────────────────────────────────────────
 
 // handlers: { cardById(id), cards(), onCommit(updatedCard, movedMs), onEnd(committed),
-//             onSelect(cardId), onAddBreak(card, { startMs, endMs }), onAddCard({ startMs, endMs }),
-//             tooltip }. cardById and cards answer nothing while no change may be made.
+//             onSelect(cardId), onAddBreak(card, { startMs, endMs }), onAddCard({ startMs, endMs }) }.
+//             cardById and cards answer nothing while no change may be made.
 export function attachTimeline(root, handlers) {
     root.addEventListener('pointerdown', event => {
         const span = event.target.closest('.tc-block, .break-overlay');
@@ -185,8 +194,17 @@ export function attachTimeline(root, handlers) {
             startDrag(event, span, handle, handlers);
         }
     });
-    root.addEventListener('pointermove', event => updateGhost(event, handlers));
-    root.addEventListener('pointerleave', hideGhost);
+    root.addEventListener('pointermove', event => {
+        updateHover(event);
+        updateGhost(event, handlers);
+        drawHover();
+    });
+    root.addEventListener('pointerleave', () => {
+        hideGhost();
+        clearHover();
+    });
+    // The tip is placed on the window, so it would stay behind on a scroll.
+    window.addEventListener('scroll', clearHover, { capture: true, passive: true });
     root.addEventListener('click', event => {
         // Only the ghost on show, and only where it was offered: a re-render since leaves it
         // detached and stale.
@@ -204,20 +222,26 @@ export function attachTimeline(root, handlers) {
         if (event.key !== 'Escape') return;
         if (drag) endDrag(false);
         hideGhost();
+        clearHover();
     });
     window.addEventListener('keyup', event => {
         if (event.key === 'Control') armGhost(false);
     });
-    window.addEventListener('blur', () => armGhost(false));
+    window.addEventListener('blur', () => {
+        armGhost(false);
+        clearHover();
+    });
 }
 
-// Ctrl held: the ghost is what a click adds now, and says so.
+// Ctrl held: the ghost is what a click adds now, and the tip says so.
 function armGhost(armed) {
+    setArmed(armed);
+    drawHover();
+}
+
+function setArmed(armed) {
     document.body.classList.toggle('ctrl-held', armed);
-    if (!ghost) return;
-    const range = `${timeFormat.format(ghost.proposal.startMs)} → ${timeFormat.format(ghost.proposal.endMs)}`;
-    ghost.element.classList.toggle('is-armed', armed);
-    ghost.element.title = armed ? `+ ${ghost.kind} ${range}` : `Ctrl+click: ${ghost.kind} ${range}`;
+    ghost?.element.classList.toggle('is-armed', armed);
 }
 
 // What a Ctrl+click under the pointer would add: a break on a card's block, a card on free time.
@@ -256,18 +280,152 @@ function updateGhost(event, handlers) {
     const { element } = ghost;
     element.className = `ghost ${offer.kind}-ghost`;
     place(element, day, proposal.startMs, proposal.endMs);
-    // Its label reaches toward the middle of the axis, so it never leaves the page.
-    const middleMs = (proposal.startMs + proposal.endMs) / 2;
-    element.dataset.align = middleMs < (day.dayStartMs + day.dayEndMs) / 2 ? 'start' : 'end';
     if (element.parentElement !== axis) axis.appendChild(element);
     Object.assign(ghost, { kind: offer.kind, cardId: offer.cardId, proposal });
-    armGhost(event.ctrlKey);
+    setArmed(event.ctrlKey);
 }
 
 function hideGhost() {
     ghost?.element.remove();
     ghost = null;
 }
+
+// ── The tip and the handle's marker ─────────────────────────────────────────
+
+function updateHover(event) {
+    const axis = event.target.closest('.timeline');
+    hover = drag || !axis ? null : {
+        axis,
+        x: event.clientX,
+        span: event.target.closest('.tc-block, .break-overlay'),
+        edge: event.target.closest('.resize-handle')?.dataset.edge ?? null,
+    };
+}
+
+function clearHover() {
+    hover = null;
+    drawHover();
+}
+
+// The tip for what is under the pointer: a handle's time with its marker, or a span's times and
+// length, and what a Ctrl+click there would add. During a drag the drag keeps both up to date.
+function drawHover() {
+    if (drag) return;
+    if (!hover?.axis.isConnected || (hover.span && !hover.span.isConnected)) {
+        hover = null;
+        hideTip();
+        hideMarker();
+        return;
+    }
+    const { axis, span, edge } = hover;
+    if (span && edge) {
+        const atMs = edgeMs(span, edge);
+        showTip(axis, placeMarker(axis, span, atMs, false), [edgeLine(span, edge, atMs)]);
+        return;
+    }
+    hideMarker();
+    const lines = span ? spanLines(span) : [];
+    if (ghost) lines.push(ghostLine());
+    if (lines.length === 0) return hideTip();
+    showTip(axis, hover.x, lines);
+}
+
+// A line of the tip: { key, text, note, tone }. key is a key to press, shown as one; note is said
+// quietly after the text; tone colours it: 'card', 'break', 'danger' or 'muted'.
+function spanLines(span) {
+    const startMs = Number(span.dataset.startMs);
+    const endSet = span.dataset.endMs !== undefined;
+    const endMs = endSet ? Number(span.dataset.endMs) : Date.now();
+    const range = `${timeFormat.format(startMs)} → ${endSet ? timeFormat.format(endMs) : 'now'}`;
+    const isBreak = span.classList.contains('break-overlay');
+    const lines = [{ text: isBreak ? `Break ${range}` : range, note: formatDurationShort(endMs - startMs) }];
+    if (span.classList.contains('is-long')) lines.push({ text: 'Over 16 hours: check its clock-out', tone: 'danger' });
+    return lines;
+}
+
+function ghostLine() {
+    const { kind, proposal } = ghost;
+    const text = `+ ${kind} ${timeFormat.format(proposal.startMs)} → ${timeFormat.format(proposal.endMs)}`;
+    return document.body.classList.contains('ctrl-held') ? { text, tone: kind } : { key: 'Ctrl+click', text, tone: 'muted' };
+}
+
+const EDGE_NAMES = { card: { start: 'clock in', end: 'clock out' }, break: { start: 'break start', end: 'break end' } };
+
+function edgeLine(span, edge, atMs) {
+    return { text: timeFormat.format(atMs), note: EDGE_NAMES[spanKind(span)][edge], tone: spanTone(span) };
+}
+
+// An edge with a handle is a set time.
+function edgeMs(span, edge) {
+    const value = edge === 'start' ? span.dataset.startMs : span.dataset.endMs;
+    assert(value !== undefined, 'a handle is on a set time');
+    return Number(value);
+}
+
+function spanKind(span) {
+    return span.classList.contains('break-overlay') ? 'break' : 'card';
+}
+
+function spanTone(span) {
+    return span.classList.contains('is-long') ? 'danger' : spanKind(span);
+}
+
+// x: where on the window the tip points, which it is centred on unless that would leave the window.
+function showTip(axis, x, lines) {
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.className = 'timeline-tip';
+        tip.setAttribute('role', 'tooltip');
+        document.body.appendChild(tip);
+    }
+    tip.replaceChildren(...lines.map(tipLine));
+    tip.hidden = false;
+    const rect = axis.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    const height = tip.offsetHeight;
+    const leftMax = Math.max(TIP_MARGIN_PX, window.innerWidth - TIP_MARGIN_PX - width);
+    tip.style.left = `${Math.round(clamp(x - width / 2, TIP_MARGIN_PX, leftMax))}px`;
+    // Above the axis, or below it where the window has no room above.
+    const above = rect.top - TIP_GAP_PX - height;
+    tip.style.top = `${Math.round(above >= TIP_MARGIN_PX ? above : rect.bottom + TIP_GAP_PX)}px`;
+}
+
+function tipLine({ key, text, note, tone }) {
+    const line = document.createElement('div');
+    line.className = 'tip-line';
+    if (tone) line.dataset.tone = tone;
+    if (key) line.append(Object.assign(document.createElement('kbd'), { textContent: key }));
+    line.append(Object.assign(document.createElement('span'), { className: 'tip-text', textContent: text }));
+    if (note) line.append(Object.assign(document.createElement('span'), { className: 'tip-note', textContent: note }));
+    return line;
+}
+
+function hideTip() {
+    if (tip) tip.hidden = true;
+}
+
+// Like a tab stop on a ruler: a marker at the top of the axis over the handle's time (the end of
+// the axis for an edge past it), with a guide down through the axis while it is dragged. Answers
+// the marker's x on the window.
+function placeMarker(axis, span, atMs, dragging) {
+    if (!marker) {
+        marker = document.createElement('div');
+        marker.className = 'edge-marker';
+    }
+    const percent = clamp(percentOfDay(axisDay(axis), atMs), 0, 100);
+    marker.style.left = `${percent}%`;
+    marker.dataset.tone = spanTone(span);
+    marker.classList.toggle('is-dragging', dragging);
+    if (marker.parentElement !== axis) axis.appendChild(marker);
+    const rect = axis.getBoundingClientRect();
+    return rect.left + (rect.width * percent) / 100;
+}
+
+function hideMarker() {
+    marker?.remove();
+}
+
+// ── Dragging ────────────────────────────────────────────────────────────────
 
 function startDrag(event, element, handle, handlers) {
     assert(!drag, 'one drag at a time');
@@ -293,10 +451,19 @@ function startDrag(event, element, handle, handlers) {
     window.addEventListener('pointercancel', onDragCancel);
     element.classList.add('is-dragging');
     document.body.classList.add('is-dragging');
+    hover = null;
+    showDragTip(edgeMs(element, drag.edge));
+}
+
+// The tip and the marker on the dragged edge, at the time it would be saved with.
+function showDragTip(atMs) {
+    const { element, edge } = drag;
+    const axis = element.parentElement;
+    showTip(axis, placeMarker(axis, element, atMs, true), [edgeLine(element, edge, atMs)]);
 }
 
 function onDragMove(event) {
-    const { axisRect, day, card, breakIndex, edge, element, handlers } = drag;
+    const { axisRect, day, card, breakIndex, edge, element } = drag;
     const fraction = (event.clientX - axisRect.left) / axisRect.width;
     const targetMs = day.dayStartMs + fraction * (day.dayEndMs - day.dayStartMs);
     const result = applyDrag(card, breakIndex, edge, targetMs, Date.now());
@@ -306,7 +473,7 @@ function onDragMove(event) {
     const startMs = new Date((breakIndex === null ? moved.clockIn : moved.start).dateTime).getTime();
     const endEvent = breakIndex === null ? moved.clockOut : moved.end;
     place(element, day, startMs, endEvent ? new Date(endEvent.dateTime).getTime() : Date.now());
-    handlers.tooltip.show(event.clientX, event.clientY, timeFormat.format(result.movedMs));
+    showDragTip(result.movedMs);
 }
 
 function onDragUp() {
@@ -324,8 +491,8 @@ function endDrag(commit) {
     window.removeEventListener('pointercancel', onDragCancel);
     element.classList.remove('is-dragging');
     document.body.classList.remove('is-dragging');
-    handlers.tooltip.hide();
     drag = null;
+    clearHover();
     if (commit && result) handlers.onCommit(result.card, result.movedMs);
     handlers.onEnd(commit && Boolean(result));
 }

@@ -57,18 +57,6 @@
   font: 600 .85rem/1.2 var(--mono);
 }
 #btn-clock { min-width: 108px }
-#drag-tooltip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 9999;
-  padding: 3px 8px;
-  background: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  font: 600 .75rem var(--mono);
-  pointer-events: none;
-}
 body.is-dragging { cursor: ew-resize; user-select: none }
 body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: progress }
 
@@ -138,24 +126,11 @@ body.is-saving #weeks :is(.tc-block, .break-overlay, .resize-handle) { cursor: p
   pointer-events: none;
 }
 .card-ghost { --ghost: #8b96ff; top: 5px; bottom: 5px }
-.ghost[data-align="end"] { justify-content: flex-end }
-.ghost::after {
-  content: attr(title);
-  position: absolute;
-  bottom: calc(100% + 12px);
-  padding: 2px 7px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text2);
-  font: 600 .7rem var(--mono);
-  white-space: nowrap;
-}
 .ghost.is-armed { background: color-mix(in srgb, var(--ghost) 35%, transparent); border-color: var(--ghost) }
-.ghost.is-armed::after { border-color: var(--ghost); color: var(--ghost) }
 body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .is-highlighted.tc-block, .is-highlighted.break-overlay { outline: 2px solid var(--success); outline-offset: 1px }
-.is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15); z-index: 4 }
+.is-dragging.tc-block, .is-dragging.break-overlay { filter: brightness(1.15) }
+.is-dragging.break-overlay { z-index: 4 }
 /* The part of a card past midnight, on the next day: worked on in the day it clocked in. */
 .is-overflow { opacity: .3; box-shadow: none; animation: none; pointer-events: none }
 
@@ -164,6 +139,76 @@ body.ctrl-held .timeline:not(:has(.is-dragging)) { cursor: copy }
 .resize-handle::before { content: ""; position: absolute; inset: 0 -5px }
 .resize-handle[data-edge="start"] { left: -1px }
 .resize-handle[data-edge="end"] { right: -1px }
+
+/* The handle pointed at, or dragged: a marker over its time at the top of the axis, like a tab
+   stop on a ruler, in its span's colour; while dragged, a guide runs down through the axis. */
+.edge-marker {
+  --marker: #8b96ff;
+  position: absolute;
+  top: -10px;
+  bottom: 0;
+  z-index: 5;
+  width: 0;
+  pointer-events: none;
+}
+.edge-marker[data-tone="break"] { --marker: var(--warn) }
+.edge-marker[data-tone="danger"] { --marker: #ff7f72 }
+.edge-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 10px;
+  height: 9px;
+  background: var(--marker);
+  clip-path: polygon(0 0, 100% 0, 100% 50%, 50% 100%, 0 50%);
+  animation: marker-in .12s ease-out;
+}
+.edge-marker.is-dragging::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 0;
+  left: -.5px;
+  border-left: 1px dashed color-mix(in srgb, var(--marker) 70%, transparent);
+}
+@keyframes marker-in { from { opacity: 0; transform: translateY(-3px) } }
+
+/* The timeline's tip: at once, quiet, above the axis it speaks of. */
+.timeline-tip {
+  position: fixed;
+  z-index: 9999;
+  display: grid;
+  gap: 3px;
+  padding: 4px 9px;
+  background: rgba(30, 33, 46, .97);
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
+  color: var(--text);
+  font-size: .72rem;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: tip-in .1s ease-out;
+}
+.timeline-tip[hidden] { display: none }
+@keyframes tip-in { from { opacity: 0; transform: translateY(3px) } }
+.tip-line { display: flex; align-items: baseline; gap: 7px }
+.tip-text { font-weight: 600; font-variant-numeric: tabular-nums }
+.tip-note { color: var(--text2) }
+.tip-line kbd {
+  padding: 0 4px;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--text2);
+  font: 600 .62rem var(--mono);
+}
+.tip-line[data-tone="card"] .tip-text { color: #b3b9ff }
+.tip-line[data-tone="break"] .tip-text { color: var(--warn) }
+.tip-line[data-tone="danger"] .tip-text { color: #ff9b94 }
+.tip-line[data-tone="muted"] .tip-text { color: var(--text2); font-weight: 500 }
 
 /* Still running, a card or a break alike: a sheen flows through it toward now, and it has no end
    handle (its end is the now line). A span whose times are all set stands still. */

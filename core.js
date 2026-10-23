@@ -73,6 +73,15 @@ export function formatDurationHms(durationMs) {
     return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
 }
 
+// A length at a glance, to the minute: '45m', '3h', '3h 05m'.
+export function formatDurationShort(durationMs) {
+    const totalMinutes = Math.max(0, Math.floor(durationMs / 60_000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return `${minutes}m`;
+    return minutes === 0 ? `${hours}h` : `${hours}h ${String(minutes).padStart(2, '0')}m`;
+}
+
 export function formatSignedDuration(durationMs) {
     const prefix = durationMs < 0 ? '-' : durationMs > 0 ? '+' : ' ';
     return `${prefix}${formatDurationHms(Math.abs(durationMs))}`;
